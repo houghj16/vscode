@@ -58,6 +58,9 @@ export class InboxOneStore extends Disposable implements IInboxOneStore {
 	) {
 		super();
 		this._tasks = observableValue<readonly ILogicalTask[]>('inboxOneTasks', []);
+		// Hydrate persisted tasks eagerly so consumers (the inbox view, the
+		// coordinator) reflect durable state on startup, not only after a mutation.
+		this.ensureHydrated().catch(() => { /* best-effort; mutations will retry */ });
 	}
 
 	get tasks(): IObservable<readonly ILogicalTask[]> {

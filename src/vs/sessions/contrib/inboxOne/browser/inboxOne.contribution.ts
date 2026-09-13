@@ -4,13 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { localize } from '../../../../nls.js';
-import { registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { localize, localize2 } from '../../../../nls.js';
+import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
+import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import product from '../../../../platform/product/common/product.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
+import { ICustomViewService } from '../../../services/customView/browser/customViewService.js';
 import { IDiffyCoordinatorService } from '../common/diffyCoordinator.js';
 import { IEventIngress } from '../common/eventIngress.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
@@ -20,8 +23,10 @@ import { EventIngress } from './eventIngress.js';
 import { INBOX_ONE_ACTIONS } from './inboxOneCommands.js';
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
+import { InboxOneView } from './inboxOneView.js';
 
 export const INBOX_ONE_ENABLED_SETTING = 'inboxOne.enabled';
+const INBOX_ONE_VIEW_ID = 'sessions.inboxOne.view';
 
 // --- shared services ---
 registerSingleton(IInboxOneStore, InboxOneStore, InstantiationType.Delayed);
@@ -33,6 +38,37 @@ registerSingleton(IDiffyCoordinatorService, DiffyCoordinatorService, Instantiati
 for (const action of INBOX_ONE_ACTIONS) {
 	registerAction2(action);
 }
+
+/** Registers the tiered inbox custom view. */
+class InboxOneViewContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'workbench.contrib.inboxOneView';
+	constructor(
+		@ICustomViewService customViewService: ICustomViewService,
+	) {
+		super();
+		this._register(customViewService.registerCustomView({
+			id: INBOX_ONE_VIEW_ID,
+			ctor: new SyncDescriptor(InboxOneView),
+		}));
+	}
+}
+registerWorkbenchContribution2(InboxOneViewContribution.ID, InboxOneViewContribution, WorkbenchPhase.BlockRestore);
+
+/** Opens the tiered inbox view. */
+class ShowInboxAction extends Action2 {
+	constructor() {
+		super({
+			id: 'inboxOne.showInbox',
+			title: localize2('inboxOne.showInbox', 'Show Inbox'),
+			category: localize2('inboxOne.category', 'Inbox One'),
+			f1: true,
+		});
+	}
+	run(accessor: ServicesAccessor): void {
+		accessor.get(ICustomViewService).showCustomView(INBOX_ONE_VIEW_ID);
+	}
+}
+registerAction2(ShowInboxAction);
 
 /**
  * Boots the always-on coordinator so it begins observing the ambient event

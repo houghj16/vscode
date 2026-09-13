@@ -1,0 +1,133 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.inbox-one-view {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: auto;
+	padding: 8px 0;
+}
+
+.inbox-one-diffy {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 16px;
+	margin: 0 8px 8px 8px;
+	border-radius: 6px;
+	background: var(--vscode-list-hoverBackground);
+	font-weight: 600;
+}
+
+.inbox-one-diffy-badge {
+	color: var(--vscode-textLink-foreground);
+	font-size: 16px;
+}
+
+.inbox-one-list {
+	display: flex;
+	flex-direction: column;
+}
+
+.inbox-one-section-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 16px 4px 16px;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-section-count {
+	opacity: 0.7;
+}
+
+.inbox-one-item {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 10px 16px;
+	margin: 2px 8px;
+	border-radius: 6px;
+	border: 1px solid transparent;
+	cursor: default;
+}
+
+.inbox-one-item:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.inbox-one-item-critical {
+	border-left: 3px solid var(--vscode-editorError-foreground, #f14c4c);
+}
+
+.inbox-one-item-urgent {
+	border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.inbox-one-item-title {
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.inbox-one-item-meta {
+	display: flex;
+	gap: 10px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-item-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 6px;
+}
+
+.inbox-one-action {
+	padding: 4px 12px;
+	border-radius: 4px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.inbox-one-action:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.inbox-one-action-primary {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+.inbox-one-action-primary:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.inbox-one-item-stage {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.inbox-one-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 40px 16px;
+	text-align: center;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-empty-title {
+	font-weight: 600;
+	font-size: 14px;
+}
