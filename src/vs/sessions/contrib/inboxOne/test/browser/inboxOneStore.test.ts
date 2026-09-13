@@ -189,4 +189,41 @@ suite('Inbox One - InboxOneStore', () => {
 		await second.markDeliverySeen('warmup');
 		assert.strictEqual(second.getTask(task.id)!.state, LogicalTaskState.Decision);
 	});
+
+	test('openContinuation opens exactly one attempt and fences double-sends (G3)', async () => {
+		const store = createStore();
+		const { task } = await store.upsertByGroupKey(init());
+		await store.transition(task.id, TaskTrigger.EvidenceAssembled); // -> Decision
+
+		const first = await store.openContinuation(task.id, TaskTrigger.Steer, 'cont-key-1');
+		assert.strictEqual(first.outcome, TransitionOutcome.Applied);
+		assert.strictEqual(first.fencedNoop ?? false, false);
+		assert.strictEqual(first.task!.state, LogicalTaskState.Cooking);
+		assert.strictEqual(first.task!.attempts.length, 2);
+
+		// A double-send with the same continuation key is a no-op (no third attempt).
+		const second = await store.openContinuation(task.id, TaskTrigger.Steer, 'cont-key-1');
+		assert.strictEqual(second.fencedNoop, true);
+		assert.strictEqual(store.getTask(task.id)!.attempts.length, 2);
+	});
+
+	test('openContinuation with a new key opens a fresh cycle', async () => {
+		const store = createStore();
+		const { task } = await store.upsertByGroupKey(init());
+		await store.transition(task.id, TaskTrigger.EvidenceAssembled);
+		await store.openContinuation(task.id, TaskTrigger.Steer, 'k1');
+		// Back to a decision, then reopen with a different key.
+		await store.transition(task.id, TaskTrigger.EvidenceAssembled);
+		const reopened = await store.openContinuation(task.id, TaskTrigger.Steer, 'k2');
+		assert.strictEqual(reopened.fencedNoop ?? false, false);
+		assert.strictEqual(store.getTask(task.id)!.attempts.length, 3);
+	});
+
+	test('openContinuation rejects an illegal transition', async () => {
+		const store = createStore();
+		const { task } = await store.upsertByGroupKey(init()); // Cooking
+		// Steer is illegal from Cooking.
+		const res = await store.openContinuation(task.id, TaskTrigger.Steer, 'k1');
+		assert.strictEqual(res.outcome, TransitionOutcome.IllegalTransition);
+	});
 });

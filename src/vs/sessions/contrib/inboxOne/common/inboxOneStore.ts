@@ -73,6 +73,8 @@ export interface ITransitionResult {
 	readonly outcome: TransitionOutcome;
 	/** The task after the transition (present when {@link outcome} is `applied`), else the current task if any. */
 	readonly task?: ILogicalTask;
+	/** True when a fenced continuation was a no-op because the key was already consumed (G3). */
+	readonly fencedNoop?: boolean;
 }
 
 /**
@@ -105,6 +107,17 @@ export interface IInboxOneStore {
 	 * stale transitions without mutating.
 	 */
 	transition(taskId: string, trigger: TaskTrigger, patch?: ITaskPatch, options?: ITransitionOptions): Promise<ITransitionResult>;
+
+	/**
+	 * Fenced steer/reopen/retry handoff (technical spec 6, gotcha G3). Computes a
+	 * continuation fence from `continuationKey`: if an attempt has already been
+	 * opened for this key, this is a no-op ({@link ITransitionResult.fencedNoop}),
+	 * which makes double-send and reopen-vs-auto-reopen races safe. Otherwise it
+	 * applies the steer/reopen/retry transition (opening exactly one fresh attempt)
+	 * in one transaction and records the key as consumed.
+	 */
+	openContinuation(taskId: string, trigger: TaskTrigger, continuationKey: string, patch?: ITaskPatch, options?: ITransitionOptions): Promise<ITransitionResult>;
+
 
 	/** CAS field update that does not change state (e.g. re-rank, refresh evidence while Cooking). */
 	updateTask(taskId: string, patch: ITaskPatch): Promise<ILogicalTask | undefined>;

@@ -28,9 +28,10 @@ interface ILedger {
 	readonly seenDeliveries: string[];
 	readonly cursors: Record<string, string>;
 	readonly drops: IDropLedgerEntry[];
+	readonly consumedContinuations: string[];
 }
 
-const EMPTY_LEDGER: ILedger = { schemaVersion: 1, tasks: [], gestures: [], seenDeliveries: [], cursors: {}, drops: [] };
+const EMPTY_LEDGER: ILedger = { schemaVersion: 1, tasks: [], gestures: [], seenDeliveries: [], cursors: {}, drops: [], consumedContinuations: [] };
 
 function routeFor(inboxId: string, taskId: string): string {
 	return `agents://inbox/${inboxId}/items/${taskId}`;
@@ -185,6 +186,34 @@ export class InboxOneStore extends Disposable implements IInboxOneStore {
 		});
 	}
 
+	async openContinuation(taskId: string, trigger: TaskTrigger, continuationKey: string, patch?: ITaskPatch, options?: ITransitionOptions): Promise<ITransitionResult> {
+		return this.mutate<ITransitionResult>(ledger => {
+			// Fence: a key already consumed means the continuation was already opened
+			// (double-send / reopen-vs-auto-reopen race). No-op (G3).
+			if (ledger.consumedContinuations.includes(continuationKey)) {
+				const task = ledger.tasks.find(t => t.id === taskId);
+				return { result: { outcome: TransitionOutcome.Applied, task, fencedNoop: true } };
+			}
+			const idx = ledger.tasks.findIndex(t => t.id === taskId);
+			if (idx === -1) {
+				return { result: { outcome: TransitionOutcome.NotFound } };
+			}
+			const task = ledger.tasks[idx];
+			const transition = getTransition(task.state, trigger);
+			if (!transition) {
+				return { result: { outcome: TransitionOutcome.IllegalTransition, task } };
+			}
+			const updated = this.applyTransition(task, transition.to, transition.opensNewAttempt, trigger, patch, options);
+			const consumed = [...ledger.consumedContinuations, continuationKey];
+			const next: ILedger = {
+				...ledger,
+				tasks: ledger.tasks.map((t, i) => (i === idx ? updated : t)),
+				consumedContinuations: consumed,
+			};
+			return { next, result: { outcome: TransitionOutcome.Applied, task: updated } };
+		});
+	}
+
 	private applyTransition(task: ILogicalTask, to: LogicalTaskState, opensNewAttempt: boolean, trigger: TaskTrigger, patch?: ITaskPatch, options?: ITransitionOptions): ILogicalTask {
 		const now = Date.now();
 		let attempts = task.attempts;
@@ -332,6 +361,7 @@ function safeParse(raw: string): ILedger {
 			seenDeliveries: parsed.seenDeliveries ?? [],
 			cursors: parsed.cursors ?? {},
 			drops: parsed.drops ?? [],
+			consumedContinuations: parsed.consumedContinuations ?? [],
 		};
 	} catch {
 		return { ...EMPTY_LEDGER };
