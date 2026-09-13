@@ -82,6 +82,8 @@ export interface IInboxOneFileStore {
 
 	/** Appends a dated entry to `/wiki/log.md` (fast tempo; distiller). */
 	appendWikiLog(entry: string): Promise<void>;
+	/** Reads the full `/wiki/log.md` (append-only evolution log). */
+	readWikiLog(): Promise<string>;
 	/** Upserts a pattern at `/wiki/patterns/{slug}.md`. */
 	upsertWikiPattern(slug: string, content: string): Promise<void>;
 	listWikiPatterns(): Promise<readonly IStoredWikiPattern[]>;

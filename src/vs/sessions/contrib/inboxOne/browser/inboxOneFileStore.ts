@@ -187,6 +187,10 @@ export class InboxOneFileStore extends Disposable implements IInboxOneFileStore 
 		await this.writeText(uri, existing + dated);
 	}
 
+	readWikiLog(): Promise<string> {
+		return this.readTextOr(joinPath(this.wikiRoot, WIKI_LOG), '# Learning log\n');
+	}
+
 	async upsertWikiPattern(slug: string, content: string): Promise<void> {
 		await this.ensureDir(this.patternsRoot);
 		await this.writeText(joinPath(this.patternsRoot, `${slug}.md`), content);
