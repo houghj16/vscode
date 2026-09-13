@@ -5,6 +5,7 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
+import { registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import product from '../../../../platform/product/common/product.js';
@@ -16,6 +17,7 @@ import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { DiffyCoordinatorService } from './diffyCoordinatorService.js';
 import { EventIngress } from './eventIngress.js';
+import { INBOX_ONE_ACTIONS } from './inboxOneCommands.js';
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 
@@ -26,6 +28,11 @@ registerSingleton(IInboxOneStore, InboxOneStore, InstantiationType.Delayed);
 registerSingleton(IInboxOneSettings, InboxOneSettingsService, InstantiationType.Delayed);
 registerSingleton(IEventIngress, EventIngress, InstantiationType.Delayed);
 registerSingleton(IDiffyCoordinatorService, DiffyCoordinatorService, InstantiationType.Delayed);
+
+// --- commands (command palette) ---
+for (const action of INBOX_ONE_ACTIONS) {
+	registerAction2(action);
+}
 
 /**
  * Boots the always-on coordinator so it begins observing the ambient event
