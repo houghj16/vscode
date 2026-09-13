@@ -34,6 +34,7 @@ class FakeSettings implements IInboxOneSettings {
 	readonly onDidChange = this._onDidChange.event;
 	private readonly enrollments = new Map<string, IRepoEnrollment>();
 	constructor(enrolled: IRepoEnrollment[] = []) { for (const e of enrolled) { this.enrollments.set(e.repo, e); } }
+	async initialize(): Promise<void> { }
 	listEnrollments(): readonly IRepoEnrollment[] { return [...this.enrollments.values()]; }
 	getEnrollment(repo: string): IRepoEnrollment | undefined { return this.enrollments.get(repo); }
 	async enrollRepo(e: IRepoEnrollment): Promise<void> { this.enrollments.set(e.repo, e); }

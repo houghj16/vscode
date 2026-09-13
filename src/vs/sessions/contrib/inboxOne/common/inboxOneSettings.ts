@@ -47,6 +47,9 @@ export interface IInboxOneSettings {
 
 	readonly onDidChange: Event<void>;
 
+	/** Loads durable settings before first use. Idempotent. */
+	initialize(): Promise<void>;
+
 	listEnrollments(): readonly IRepoEnrollment[];
 	getEnrollment(repo: string): IRepoEnrollment | undefined;
 	enrollRepo(enrollment: IRepoEnrollment): Promise<void>;

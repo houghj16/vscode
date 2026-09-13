@@ -4,21 +4,28 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IAutomationStorageService } from '../../automations/common/automationStorageService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { CoordinatorEngine } from '../common/coordinatorEngine.js';
 import { IDiffyCoordinatorService } from '../common/diffyCoordinator.js';
 import { IEventIngress } from '../common/eventIngress.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
+import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IIngressEvent } from '../common/inboxOneTypes.js';
+import { IWorkerDispatcher } from '../common/workerDispatcher.js';
+import { LiveAdmissionManager } from './liveAdmissionManager.js';
+import { StubWorkerDispatcher } from './stubWorkerDispatcher.js';
 
 /** MVP: a single personal inbox per user (design 7.7). Multi-inbox/team routing is deferred. */
 const PERSONAL_INBOX_ID = 'my';
 
 /**
- * Phase-0 coordinator skeleton. It subscribes to the single ambient event stream
- * and owns the intake seam. The deterministic dispatch gate, role selection,
- * admission control, and worker dispatch are layered on top of this in the
- * coordinator workstream; for now intake is observed and recorded so the
- * ingress -> coordinator loop is verifiable end to end.
+ * The always-on coordinator ("Diffy"). Bootstraps the durable services, builds
+ * the deterministic {@link CoordinatorEngine}, and drives it from the single
+ * ambient event stream. Worker dispatch is delegated to an
+ * {@link IWorkerDispatcher}; until the session-harness-backed dispatcher lands, a
+ * stub records intent so the ingress -> gate -> admission -> store loop runs
+ * end to end.
  */
 export class DiffyCoordinatorService extends Disposable implements IDiffyCoordinatorService {
 
@@ -26,12 +33,23 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 
 	readonly inboxId = PERSONAL_INBOX_ID;
 
+	private readonly engine: CoordinatorEngine;
+	private readonly ready: Promise<void>;
+
 	constructor(
 		@IEventIngress private readonly ingress: IEventIngress,
 		@IInboxOneStore private readonly store: IInboxOneStore,
+		@IInboxOneSettings private readonly settings: IInboxOneSettings,
+		@IAutomationStorageService storage: IAutomationStorageService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
+		const admission = new LiveAdmissionManager(this.store, this.settings, storage);
+		const dispatcher: IWorkerDispatcher = new StubWorkerDispatcher(this.logService);
+		this.engine = new CoordinatorEngine(this.inboxId, this.store, this.settings, admission, dispatcher, this.logService);
+
+		this.ready = this.settings.initialize();
+
 		this._register(this.ingress.onDidReceiveEvent(event => {
 			// Fire-and-forget: intake failures must never crash the coordinator loop.
 			this.handleEvent(event).catch(err => this.logService.error('[inboxOne] coordinator intake failed', err));
@@ -39,9 +57,7 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 	}
 
 	async handleEvent(event: IIngressEvent): Promise<void> {
-		// The dispatch gate (design 4) and worker dispatch are implemented in the
-		// coordinator workstream. This skeleton records that the event reached the
-		// coordinator so the wiring can be verified; it never mints a task yet.
-		this.logService.trace(`[inboxOne] Diffy received ${event.type}${event.action ? '.' + event.action : ''} for ${event.repo ?? event.sessionId ?? 'unknown'} (inbox ${this.inboxId}, ${this.store.tasks.get().length} tasks)`);
+		await this.ready;
+		await this.engine.handleEvent(event);
 	}
 }

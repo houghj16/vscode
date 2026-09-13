@@ -29,6 +29,7 @@ class FakeSettings implements IInboxOneSettings {
 	declare readonly _serviceBrand: undefined;
 	readonly onDidChange = new Emitter<void>().event;
 	constructor(private readonly caps: IBudgetCaps) { }
+	async initialize(): Promise<void> { }
 	listEnrollments(): readonly IRepoEnrollment[] { return []; }
 	getEnrollment(): IRepoEnrollment | undefined { return undefined; }
 	async enrollRepo(): Promise<void> { }

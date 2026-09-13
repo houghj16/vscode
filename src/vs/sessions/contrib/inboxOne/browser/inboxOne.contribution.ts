@@ -13,14 +13,17 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IDiffyCoordinatorService } from '../common/diffyCoordinator.js';
 import { IEventIngress } from '../common/eventIngress.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
+import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { DiffyCoordinatorService } from './diffyCoordinatorService.js';
 import { EventIngress } from './eventIngress.js';
+import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 
 export const INBOX_ONE_ENABLED_SETTING = 'inboxOne.enabled';
 
 // --- shared services ---
 registerSingleton(IInboxOneStore, InboxOneStore, InstantiationType.Delayed);
+registerSingleton(IInboxOneSettings, InboxOneSettingsService, InstantiationType.Delayed);
 registerSingleton(IEventIngress, EventIngress, InstantiationType.Delayed);
 registerSingleton(IDiffyCoordinatorService, DiffyCoordinatorService, InstantiationType.Delayed);
 
