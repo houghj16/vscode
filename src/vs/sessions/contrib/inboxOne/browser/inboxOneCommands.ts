@@ -8,10 +8,12 @@ import { Action2 } from '../../../../platform/actions/common/actions.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { ActionType, EventSource, EvidenceRung, IIngressEvent, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { rank } from '../common/ranking.js';
+import { TaskTrigger } from '../common/inboxOneStateMachine.js';
 import { IEventIngress } from '../common/eventIngress.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
-import { EventSource, IIngressEvent, LogicalTaskState } from '../common/inboxOneTypes.js';
 
 const INBOX_ONE_CATEGORY = localize2('inboxOne.category', 'Inbox One');
 
@@ -131,6 +133,60 @@ export class SimulateEventAction extends Action2 {
 	}
 }
 
+/**
+ * Dev tool: advance a cooking task to a decision by attaching a synthetic
+ * evidence pack + a host-ranked tier, so the full decision UX (tiers, evidence,
+ * Accept/Steer/Dismiss) can be exercised live without a real worker.
+ */
+export class SimulateWorkerResultAction extends Action2 {
+	static readonly ID = 'inboxOne.simulateWorkerResult';
+	constructor() {
+		super({
+			id: SimulateWorkerResultAction.ID,
+			title: localize2('inboxOne.simulateWorkerResult', 'Simulate Worker Result (Dev)'),
+			category: INBOX_ONE_CATEGORY,
+			f1: true,
+		});
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const store = accessor.get(IInboxOneStore);
+		const quickInput = accessor.get(IQuickInputService);
+		const notification = accessor.get(INotificationService);
+
+		const cooking = store.tasks.get().filter(t => t.state === LogicalTaskState.Cooking);
+		if (cooking.length === 0) {
+			notification.warn(localize('inboxOne.noCooking', 'No cooking tasks. Simulate a GitHub event first.'));
+			return;
+		}
+		const task = cooking.length === 1
+			? cooking[0]
+			: await quickInput.pick(cooking.map(t => ({ label: t.type + ' ' + t.sourceEvent.subject.id, id: t.id })), { placeHolder: localize('inboxOne.pickTask', 'Cooking task to resolve') }).then(p => cooking.find(t => t.id === p?.id));
+		if (!task) {
+			return;
+		}
+
+		const n = task.sourceEvent.subject.id;
+		const isReview = task.type === 'code-review';
+		await store.setEvidence(task.id, {
+			decisionSentence: isReview
+				? localize('inboxOne.reviewReady', 'PR #{0} is ready to approve', n)
+				: localize('inboxOne.fixReady', 'Fix for {0} is green and ready', n),
+			claims: [
+				{ text: localize('inboxOne.claim1', '47/47 checks pass, incl. 3 that were red an hour ago'), receiptLink: 'https://example/run/1', rung: EvidenceRung.SingleRun },
+				{ text: localize('inboxOne.claim2', 'Change limited to the expired-session retry path'), receiptLink: 'https://example/diff/1', rung: EvidenceRung.SourceLineage },
+			],
+			gapLine: localize('inboxOne.gap', 'Not verified: behavior under production load.'),
+			freshness: { headSha: '7a61d9e', computedAt: Date.now() },
+			primaryAction: isReview
+				? { label: localize('inboxOne.approve', 'Approve PR'), actionType: ActionType.ApprovePr, payload: { repo: task.repo, prNumber: Number(n) } }
+				: { label: localize('inboxOne.merge', 'Merge fix'), actionType: ActionType.MergePr, payload: { repo: task.repo, prNumber: Number(n), base: 'main', strategy: 'squash', rerunChecks: true } },
+		});
+		const ranked = rank({ blocksPeople: 2, evidenceConfidence: 0.9, recipientAffinity: 0.8, urgency: 0.6, perishability: 0.5 });
+		await store.transition(task.id, TaskTrigger.EvidenceAssembled, { tier: ranked.tier, rank: ranked.rank, rankReason: ranked.reason });
+		notification.notify({ severity: Severity.Info, message: localize('inboxOne.resolved', 'Landed as a {0} decision.', ranked.tier) });
+	}
+}
+
 function buildSyntheticEvent(kind: string, repo: string, n: number): IIngressEvent {
 	const base = { deliveryId: `sim-${kind}-${repo}-${n}-${Date.now()}`, source: EventSource.World, repo, receivedAt: Date.now() };
 	switch (kind) {
@@ -144,4 +200,4 @@ function buildSyntheticEvent(kind: string, repo: string, n: number): IIngressEve
 	}
 }
 
-export const INBOX_ONE_ACTIONS = [EnrollRepositoryAction, ShowInboxStatusAction, SimulateEventAction];
+export const INBOX_ONE_ACTIONS = [EnrollRepositoryAction, ShowInboxStatusAction, SimulateEventAction, SimulateWorkerResultAction];
