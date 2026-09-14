@@ -24,9 +24,11 @@ import { INBOX_ONE_ACTIONS } from './inboxOneCommands.js';
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
+import { InboxOneSettingsView } from './inboxOneSettingsView.js';
 
 export const INBOX_ONE_ENABLED_SETTING = 'inboxOne.enabled';
 const INBOX_ONE_VIEW_ID = 'sessions.inboxOne.view';
+const INBOX_ONE_SETTINGS_VIEW_ID = 'sessions.inboxOne.settings';
 
 // --- shared services ---
 registerSingleton(IInboxOneStore, InboxOneStore, InstantiationType.Delayed);
@@ -50,6 +52,10 @@ class InboxOneViewContribution extends Disposable implements IWorkbenchContribut
 			id: INBOX_ONE_VIEW_ID,
 			ctor: new SyncDescriptor(InboxOneView),
 		}));
+		this._register(customViewService.registerCustomView({
+			id: INBOX_ONE_SETTINGS_VIEW_ID,
+			ctor: new SyncDescriptor(InboxOneSettingsView),
+		}));
 	}
 }
 registerWorkbenchContribution2(InboxOneViewContribution.ID, InboxOneViewContribution, WorkbenchPhase.BlockRestore);
@@ -69,6 +75,22 @@ class ShowInboxAction extends Action2 {
 	}
 }
 registerAction2(ShowInboxAction);
+
+/** Opens Settings > Coordinator. */
+class ShowSettingsAction extends Action2 {
+	constructor() {
+		super({
+			id: 'inboxOne.showSettings',
+			title: localize2('inboxOne.showSettings', 'Coordinator Settings'),
+			category: localize2('inboxOne.category', 'Inbox One'),
+			f1: true,
+		});
+	}
+	run(accessor: ServicesAccessor): void {
+		accessor.get(ICustomViewService).showCustomView(INBOX_ONE_SETTINGS_VIEW_ID);
+	}
+}
+registerAction2(ShowSettingsAction);
 
 /**
  * Boots the always-on coordinator so it begins observing the ambient event

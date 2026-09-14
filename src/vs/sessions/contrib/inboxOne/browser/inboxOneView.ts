@@ -9,6 +9,7 @@ import { autorun, constObservable, IObservable, ISettableObservable, observableV
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { AbstractCustomView } from '../../../services/customView/browser/customView.js';
 import { buildConfirmation } from '../common/actionConfirmation.js';
@@ -58,6 +59,7 @@ export class InboxOneView extends AbstractCustomView {
 		@IInboxOneStore private readonly store: IInboxOneStore,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IOpenerService private readonly openerService: IOpenerService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super();
 		this.description = this.store.tasks.map(tasks => {
@@ -117,6 +119,9 @@ export class InboxOneView extends AbstractCustomView {
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefNeed', '{0} need you: {1}', decisions.length, decisions.map(t => t.evidence?.decisionSentence ?? t.type).join('; ') || '-')));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefCooking', '{0} cooking', cooking.length)));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefAuto', '{0} auto-handled and logged', autoHandled.length)));
+
+		const settingsLink = brief.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.openSettings', 'Coordinator settings')));
+		this._register(addClick(settingsLink, () => void this.commandService.executeCommand('inboxOne.showSettings')));
 
 		const reference = this.diffyReference.get();
 		const referencedTask = reference ? tasks.find(t => t.id === reference.taskId) : undefined;
