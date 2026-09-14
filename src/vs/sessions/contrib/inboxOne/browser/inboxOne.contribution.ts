@@ -26,6 +26,7 @@ import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
 import { NotificationOrchestrator } from './notificationOrchestrator.js';
+import { WebhookIngressService } from './webhookIngressService.js';
 import { InboxOneSettingsView } from './inboxOneSettingsView.js';
 import { InboxOneSkillsView } from './inboxOneSkillsView.js';
 import { WorkbenchInboxOneFileStore } from './workbenchInboxOneFileStore.js';
@@ -134,6 +135,9 @@ class InboxOneContribution extends Disposable implements IWorkbenchContribution 
 		// Resolving the coordinator eagerly wires ingress -> coordinator intake.
 		// The notification orchestrator turns pushable decisions into OS notifications.
 		this._register(instantiationService.createInstance(NotificationOrchestrator));
+		// The webhook ingress wires the steady-state transport seam (backfill on
+		// downtime recovery only; no periodic polling).
+		this._register(instantiationService.createInstance(WebhookIngressService));
 	}
 }
 
