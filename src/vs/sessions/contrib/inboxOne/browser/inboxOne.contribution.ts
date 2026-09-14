@@ -27,6 +27,7 @@ import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
 import { LearningOrchestratorService } from './learningOrchestratorService.js';
 import { NotificationOrchestrator } from './notificationOrchestrator.js';
+import { SessionEventAdapterService } from './sessionEventAdapterService.js';
 import { WebhookIngressService } from './webhookIngressService.js';
 import { InboxOneSettingsView } from './inboxOneSettingsView.js';
 import { InboxOneSkillsView } from './inboxOneSkillsView.js';
@@ -148,6 +149,8 @@ class InboxOneContribution extends Disposable implements IWorkbenchContribution 
 		this._register(instantiationService.createInstance(WebhookIngressService));
 		// The learning loop runs the distiller/curator on every task resolution.
 		this._register(instantiationService.createInstance(LearningOrchestratorService));
+		// Route Diffy's dispatched worker-session lifecycle back into the inbox (G15).
+		this._register(instantiationService.createInstance(SessionEventAdapterService));
 	}
 }
 
