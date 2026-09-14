@@ -8,9 +8,7 @@ import { Action2 } from '../../../../platform/actions/common/actions.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
-import { ActionType, EventSource, EvidenceRung, IIngressEvent, ILogicalTask, LogicalTaskState } from '../common/inboxOneTypes.js';
-import { rank } from '../common/ranking.js';
-import { TaskTrigger } from '../common/inboxOneStateMachine.js';
+import { EventSource, IIngressEvent, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { IEventIngress } from '../common/eventIngress.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
@@ -133,95 +131,6 @@ export class SimulateEventAction extends Action2 {
 	}
 }
 
-/**
- * Dev tool: advance a cooking task to a decision by attaching a synthetic
- * evidence pack + a host-ranked tier, so the full decision UX (tiers, evidence,
- * Accept/Steer/Dismiss) can be exercised live without a real worker.
- */
-export class SimulateWorkerResultAction extends Action2 {
-	static readonly ID = 'inboxOne.simulateWorkerResult';
-	constructor() {
-		super({
-			id: SimulateWorkerResultAction.ID,
-			title: localize2('inboxOne.simulateWorkerResult', 'Simulate Worker Result (Dev)'),
-			category: INBOX_ONE_CATEGORY,
-			f1: true,
-		});
-	}
-	async run(accessor: ServicesAccessor): Promise<void> {
-		const store = accessor.get(IInboxOneStore);
-		const quickInput = accessor.get(IQuickInputService);
-		const notification = accessor.get(INotificationService);
-
-		const cooking = store.tasks.get().filter(t => t.state === LogicalTaskState.Cooking);
-		if (cooking.length === 0) {
-			notification.warn(localize('inboxOne.noCooking', 'No cooking tasks. Simulate a GitHub event first.'));
-			return;
-		}
-		const task = cooking.length === 1
-			? cooking[0]
-			: await quickInput.pick(cooking.map(t => ({ label: t.type + ' ' + t.sourceEvent.subject.id, id: t.id })), { placeHolder: localize('inboxOne.pickTask', 'Cooking task to resolve') }).then(p => cooking.find(t => t.id === p?.id));
-		if (!task) {
-			return;
-		}
-
-		const shaped = buildSyntheticEvidence(task);
-		await store.setEvidence(task.id, {
-			decisionSentence: shaped.decisionSentence,
-			claims: [
-				{ text: localize('inboxOne.claim1', '47/47 checks pass, incl. 3 that were red an hour ago'), receiptLink: 'https://example/run/1', rung: EvidenceRung.SingleRun },
-				{ text: localize('inboxOne.claim2', 'Change limited to the expired-session retry path'), receiptLink: 'https://example/diff/1', rung: EvidenceRung.SourceLineage },
-			],
-			gapLine: localize('inboxOne.gap', 'Not verified: behavior under production load.'),
-			freshness: { headSha: '7a61d9e', computedAt: Date.now() },
-			primaryAction: shaped.primaryAction,
-		});
-		const ranked = rank({ blocksPeople: 2, evidenceConfidence: 0.9, recipientAffinity: 0.8, urgency: 0.6, perishability: 0.5 });
-		await store.transition(task.id, TaskTrigger.EvidenceAssembled, { tier: ranked.tier, rank: ranked.rank, rankReason: ranked.reason });
-		notification.notify({ severity: Severity.Info, message: localize('inboxOne.resolved', 'Landed as a {0} decision.', ranked.tier) });
-	}
-}
-
-/** Dev: turn a cooking task into a Blocked decision with one recovery step (wireframes 7). */
-export class SimulateWorkerBlockedAction extends Action2 {
-	static readonly ID = 'inboxOne.simulateWorkerBlocked';
-	constructor() {
-		super({
-			id: SimulateWorkerBlockedAction.ID,
-			title: localize2('inboxOne.simulateWorkerBlocked', 'Simulate Worker Blocked (Dev)'),
-			category: INBOX_ONE_CATEGORY,
-			f1: true,
-		});
-	}
-	async run(accessor: ServicesAccessor): Promise<void> {
-		const store = accessor.get(IInboxOneStore);
-		const quickInput = accessor.get(IQuickInputService);
-		const notification = accessor.get(INotificationService);
-
-		const cooking = store.tasks.get().filter(t => t.state === LogicalTaskState.Cooking);
-		if (cooking.length === 0) {
-			notification.warn(localize('inboxOne.noCooking', 'No cooking tasks. Simulate a GitHub event first.'));
-			return;
-		}
-		const task = cooking.length === 1
-			? cooking[0]
-			: await quickInput.pick(cooking.map(t => ({ label: t.type + ' ' + t.sourceEvent.subject.id, id: t.id })), { placeHolder: localize('inboxOne.pickTask', 'Cooking task to resolve') }).then(p => cooking.find(t => t.id === p?.id));
-		if (!task) {
-			return;
-		}
-		await store.setEvidence(task.id, {
-			decisionSentence: localize('inboxOne.blockedSentence', "Can't verify CVE reachability without the prod dependency graph"),
-			claims: [{ text: localize('inboxOne.blockedClaim', 'The alert is real but reachability needs the prod lockfile'), receiptLink: 'https://example/alert/77', rung: EvidenceRung.SingleRun }],
-			gapLine: localize('inboxOne.blockedGap', 'Not verified: whether the vulnerable path is reachable in production.'),
-			freshness: { computedAt: Date.now() },
-		});
-		await store.transition(task.id, TaskTrigger.Blocker, {
-			recoveryStep: localize('inboxOne.blockedRecovery', 'read access to the prod lockfile (or confirm it matches the repo lockfile).'),
-		});
-		notification.notify({ severity: Severity.Info, message: localize('inboxOne.blockedNotify', 'Landed as a Blocked decision.') });
-	}
-}
-
 function buildSyntheticEvent(kind: string, repo: string, n: number): IIngressEvent {
 	const base = { deliveryId: `sim-${kind}-${repo}-${n}-${Date.now()}`, source: EventSource.World, repo, receivedAt: Date.now() };
 	switch (kind) {
@@ -235,38 +144,6 @@ function buildSyntheticEvent(kind: string, repo: string, n: number): IIngressEve
 	}
 }
 
-interface IShapedEvidence {
-	readonly decisionSentence: string;
-	readonly primaryAction: { readonly label: string; readonly actionType: ActionType; readonly payload: unknown };
-}
-
-/** Role-faithful synthetic evidence so the dev harness demonstrates each scenario distinctly. */
-function buildSyntheticEvidence(task: ILogicalTask): IShapedEvidence {
-	const subject = task.sourceEvent.subject;
-	const repo = task.repo;
-	// A fix targets the PR the failing check attaches to; other roles use the subject.
-	const displayId = subject.id;
-	const prNumber = Number(subject.attachedTo?.id ?? subject.id);
-	switch (task.type) {
-		case 'issue-triage':
-			return {
-				decisionSentence: localize('inboxOne.triageReady', '5 new issues cluster into 2 themes'),
-				primaryAction: { label: localize('inboxOne.createIssues', 'Create issues'), actionType: ActionType.CreateIssues, payload: { repo, issues: [{ title: `Meta-issue for #${displayId}`, body: localize('inboxOne.metaBody', 'Groups the duplicate reports under one tracking issue.'), sourceIssues: [Number(displayId)] }] } },
-			};
-		case 'implement-fix':
-			return {
-				decisionSentence: localize('inboxOne.fixReady', 'Fix for PR #{0} is green and ready', String(prNumber)),
-				primaryAction: { label: localize('inboxOne.merge', 'Merge fix'), actionType: ActionType.MergePr, payload: { repo, prNumber, base: 'main', strategy: 'squash', rerunChecks: true } },
-			};
-		case 'code-review':
-		default:
-			return {
-				decisionSentence: localize('inboxOne.reviewReady', 'PR #{0} is ready to approve', displayId),
-				primaryAction: { label: localize('inboxOne.approve', 'Approve PR'), actionType: ActionType.ApprovePr, payload: { repo, prNumber: Number(displayId) } },
-			};
-	}
-}
-
 export const INBOX_ONE_ACTIONS = [EnrollRepositoryAction, ShowInboxStatusAction];
 /** Dev-only simulator commands: registered only in non-stable builds so their synthetic evidence can never run in production. */
-export const INBOX_ONE_DEV_ACTIONS = [SimulateEventAction, SimulateWorkerResultAction, SimulateWorkerBlockedAction];
+export const INBOX_ONE_DEV_ACTIONS = [SimulateEventAction];

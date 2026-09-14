@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import product from '../../../../platform/product/common/product.js';
 import { IAutomationStorageService } from '../../automations/common/automationStorageService.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
@@ -14,9 +15,10 @@ import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IIngressEvent } from '../common/inboxOneTypes.js';
 import { IWorkerDispatcher } from '../common/workerDispatcher.js';
-import { TranscriptWorkerResultReader } from '../common/workerResult.js';
+import { ITranscriptSource, TranscriptWorkerResultReader } from '../common/workerResult.js';
 import { LiveAdmissionManager } from './liveAdmissionManager.js';
-import { SessionsManagementWorkerDispatcher } from './sessionsManagementWorkerDispatcher.js';
+import { isPendingRef, SessionsManagementWorkerDispatcher } from './sessionsManagementWorkerDispatcher.js';
+import { CompositeTranscriptSource, FallbackWorkerDispatcher, SimulatedWorkerDispatcher, SimulatedWorkerRuntime } from './simulatedWorkerDispatcher.js';
 import { WorkbenchTranscriptSource } from './workbenchTranscriptSource.js';
 
 /** MVP: a single personal inbox per user (design 7.7). Multi-inbox/team routing is deferred. */
@@ -49,10 +51,26 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 	) {
 		super();
 		const admission = new LiveAdmissionManager(this.store, this.settings, storage);
-		const dispatcher: IWorkerDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher);
+		const realDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher);
 		// Reads a finished worker session's final message from the chat model, so
 		// `task_finished` produces real evidence with a connected host.
-		const resultReader = new TranscriptWorkerResultReader(instantiationService.createInstance(WorkbenchTranscriptSource));
+		const workbenchSource = instantiationService.createInstance(WorkbenchTranscriptSource);
+
+		let dispatcher: IWorkerDispatcher = realDispatcher;
+		let transcriptSource: ITranscriptSource = workbenchSource;
+		// Dev builds fall back to an in-window worker simulator when no agent host
+		// is connected, so the full production loop (dispatch -> run -> emit-result
+		// -> host-validate -> host-rank -> land) is exercised headless with real,
+		// non-hardcoded evidence. Never wired in stable builds (see the gate), so
+		// simulated evidence can never reach production.
+		if (product.quality !== 'stable') {
+			const runtime = this._register(new SimulatedWorkerRuntime(this.ingress, this.logService));
+			const simulated = new SimulatedWorkerDispatcher(runtime);
+			dispatcher = new FallbackWorkerDispatcher(realDispatcher, simulated, this.logService, isPendingRef);
+			transcriptSource = new CompositeTranscriptSource([runtime, workbenchSource]);
+		}
+
+		const resultReader = new TranscriptWorkerResultReader(transcriptSource);
 		this.engine = new CoordinatorEngine(this.inboxId, this.store, this.settings, admission, dispatcher, this.logService, undefined, resultReader);
 
 		this.ready = this.settings.initialize();

@@ -16,7 +16,12 @@ import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from
 import { composeWorkerFirstMessage } from '../common/workerBrief.js';
 
 /** URI scheme for a deferred dispatch when no agent host/target is available yet. */
-const PENDING_SCHEME = 'inboxone-pending';
+export const PENDING_SCHEME = 'inboxone-pending';
+
+/** Whether a dispatch result deferred for want of an agent host / session target. */
+export function isPendingRef(sessionRef: string): boolean {
+	return sessionRef.startsWith(`${PENDING_SCHEME}:`);
+}
 
 /** Metadata keys stamped on a dispatched worker session so it resolves back to its task (G15). */
 export const INBOX_ONE_SESSION_META = {
