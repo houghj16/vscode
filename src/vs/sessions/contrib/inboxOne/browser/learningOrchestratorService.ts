@@ -5,12 +5,14 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IAutomationStorageService } from '../../automations/common/automationStorageService.js';
 import { IInboxOneFileStore } from '../common/inboxOneFileStore.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { GestureKind, ILogicalTask, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { IExperienceRecord } from '../common/learningLoop.js';
+import { DistillerSessionDispatcher } from './distillerSessionDispatcher.js';
 import { LearningOrchestrator } from './learningOrchestrator.js';
 
 /**
@@ -24,9 +26,11 @@ import { LearningOrchestrator } from './learningOrchestrator.js';
  * work within a session. The gesture is inferred from the terminal state:
  * Completed -> Accept, Archived("not my area") -> NotMyArea, else Dismiss.
  *
- * This is the host scaffolding that keeps the loop durable + idempotent; the
- * heavy semantic consolidation (writing lessons, proposing skill diffs) plugs in
- * as a stock session via {@link LearningOrchestrator}'s `distillOne` hook.
+ * The deterministic consolidation (wiki log + skill-impact ledger) runs on the
+ * host; the semantic authorship (write the lesson, propose the versioned skill
+ * diff) is delegated to a stock distiller agent session via the
+ * {@link DistillerSessionDispatcher} wired into `distillOne` -- real agent calls
+ * when a host is connected, a graceful no-op otherwise.
  */
 export class LearningOrchestratorService extends Disposable {
 
@@ -40,10 +44,12 @@ export class LearningOrchestratorService extends Disposable {
 		@IInboxOneStore private readonly store: IInboxOneStore,
 		@IInboxOneFileStore private readonly fileStore: IInboxOneFileStore,
 		@IAutomationStorageService storage: IAutomationStorageService,
+		@IInstantiationService instantiationService: IInstantiationService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
-		this.orchestrator = new LearningOrchestrator(fileStore, storage, logService);
+		const distiller = this._register(instantiationService.createInstance(DistillerSessionDispatcher));
+		this.orchestrator = new LearningOrchestrator(fileStore, storage, logService, distiller.distill);
 		this.ready = fileStore.initialize();
 		this._register(autorun(reader => {
 			const tasks = this.store.tasks.read(reader);
