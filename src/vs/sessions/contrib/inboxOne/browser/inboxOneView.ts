@@ -23,6 +23,9 @@ interface ITierSpec {
 	readonly match: (task: ILogicalTask) => boolean;
 }
 
+/** Sentinel selection value for the pinned Diffy coordinator entry. */
+const DIFFY_SELECTION = '__diffy__';
+
 /** The inbox sections in display order (design 3.1). */
 const SECTIONS: readonly ITierSpec[] = [
 	{ key: 'critical', label: localize('inboxOne.critical', 'CRITICAL'), match: t => t.state === LogicalTaskState.Decision && t.tier === InboxOneTier.Critical },
@@ -70,6 +73,10 @@ export class InboxOneView extends AbstractCustomView {
 		const diffy = left.appendChild($('.inbox-one-diffy'));
 		diffy.appendChild($('.inbox-one-diffy-badge', undefined, '\u2726'));
 		diffy.appendChild($('.inbox-one-diffy-label', undefined, localize('inboxOne.diffy', 'Diffy')));
+		this._register(addClick(diffy, () => this.selectedTaskId.set(DIFFY_SELECTION, undefined)));
+		this._register(autorun(reader => {
+			diffy.classList.toggle('selected', this.selectedTaskId.read(reader) === DIFFY_SELECTION);
+		}));
 		this.listEl = left.appendChild($('.inbox-one-list'));
 
 		this.detailEl = panes.appendChild($('.inbox-one-detail'));
@@ -78,8 +85,59 @@ export class InboxOneView extends AbstractCustomView {
 			const tasks = this.store.tasks.read(reader);
 			const selected = this.selectedTaskId.read(reader);
 			this.renderList(tasks, selected);
-			this.renderDetail(tasks.find(t => t.id === selected));
+			if (selected === DIFFY_SELECTION) {
+				this.renderDiffyDetail(tasks);
+			} else {
+				this.renderDetail(tasks.find(t => t.id === selected));
+			}
 		}));
+	}
+
+	/** The Diffy coordinator thread (design 3.2): watching status, on-demand brief, composer. */
+	private renderDiffyDetail(tasks: readonly ILogicalTask[]): void {
+		const detail = this.detailEl;
+		if (!detail) {
+			return;
+		}
+		clearNode(detail);
+		this.confirmPanel = undefined;
+
+		const repos = new Set(tasks.map(t => t.repo).filter(Boolean));
+		detail.appendChild($('.inbox-one-detail-tier', undefined, localize('inboxOne.coordinator', 'COORDINATOR')));
+		detail.appendChild($('h2.inbox-one-detail-title', undefined, localize('inboxOne.diffyWatching', 'Diffy - watching {0} repo(s)', repos.size)));
+
+		const decisions = tasks.filter(t => t.state === LogicalTaskState.Decision || t.state === LogicalTaskState.Blocked);
+		const cooking = tasks.filter(t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming);
+		const autoHandled = tasks.filter(t => t.tier === InboxOneTier.Fyi && t.state === LogicalTaskState.Completed);
+
+		const brief = detail.appendChild($('.inbox-one-diffy-brief'));
+		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefNeed', '{0} need you: {1}', decisions.length, decisions.map(t => t.evidence?.decisionSentence ?? t.type).join('; ') || '-')));
+		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefCooking', '{0} cooking', cooking.length)));
+		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefAuto', '{0} auto-handled and logged', autoHandled.length)));
+
+		const composer = detail.appendChild($('.inbox-one-diffy-composer'));
+		const input = composer.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
+		input.type = 'text';
+		input.placeholder = localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
+		const send = composer.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.send', 'Send')));
+		const submit = () => {
+			const text = input.value.trim();
+			if (!text) {
+				return;
+			}
+			input.value = '';
+			this.notificationService.info(localize('inboxOne.diffyReply', 'Diffy: {0}', this.diffyReply(text, decisions.length, cooking.length, repos.size)));
+		};
+		this._register(addClick(send, submit));
+		this._register(addKeydown(input, 'Enter', submit));
+	}
+
+	private diffyReply(prompt: string, needYou: number, cooking: number, repos: number): string {
+		const lower = prompt.toLowerCase();
+		if (lower.includes('brief') || lower.includes('status')) {
+			return localize('inboxOne.diffyBrief', 'Across {0} repo(s): {1} need you, {2} cooking. Nothing else cleared the bar.', repos, needYou, cooking);
+		}
+		return localize('inboxOne.diffyAck', "Got it. I'll factor that into how I triage and dispatch.");
 	}
 
 	private renderList(tasks: readonly ILogicalTask[], selectedId: string | undefined): void {
@@ -275,4 +333,10 @@ function addClick(el: HTMLElement, handler: () => void): { dispose(): void } {
 	const listener = (e: Event) => { e.preventDefault(); e.stopPropagation(); handler(); };
 	el.addEventListener('click', listener);
 	return { dispose: () => el.removeEventListener('click', listener) };
+}
+
+function addKeydown(el: HTMLElement, key: string, handler: () => void): { dispose(): void } {
+	const listener = (e: KeyboardEvent) => { if (e.key === key) { e.preventDefault(); handler(); } };
+	el.addEventListener('keydown', listener);
+	return { dispose: () => el.removeEventListener('keydown', listener) };
 }

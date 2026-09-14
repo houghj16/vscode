@@ -104,6 +104,8 @@ import { getAgentMergeAwarePullRequestIcon, getSessionAgentMergeConfigurationObs
 const $ = DOM.$;
 
 const AUTOMATIONS_SECTION_ID = 'automations';
+const INBOX_ONE_SECTION_ID = 'inboxOne';
+const INBOX_ONE_CUSTOM_VIEW_ID = 'sessions.inboxOne.view';
 const SESSION_SECTION_FOCUS_FROM_POINTER_CLASS = 'session-section-focus-from-pointer';
 const SESSION_HEADER_DROP_TARGET_CLASS = 'session-header-drop-target';
 /** Shared empty set used as the default "no session hierarchy is hovered/selected" value. */
@@ -244,6 +246,8 @@ function getSessionSectionIcon(sectionId: string): ThemeIcon | undefined {
 			return Codicon.pinned;
 		case AUTOMATIONS_SECTION_ID:
 			return Codicon.calendar;
+		case INBOX_ONE_SECTION_ID:
+			return Codicon.inbox;
 		case 'archived':
 			return Codicon.archive;
 		case 'recent':
@@ -1413,6 +1417,9 @@ export class SessionSectionRenderer implements ITreeRenderer<SessionListItem, Fu
 		if (element.id === AUTOMATIONS_SECTION_ID) {
 			template.container.classList.add('session-section-shortcut');
 		}
+		if (element.id === INBOX_ONE_SECTION_ID) {
+			template.container.classList.add('session-section-shortcut');
+		}
 
 		// Leading icon for the "Pinned" and "Chats" (quick chats) section headers.
 		// Templates are reused across rows, so recompute the icon every render.
@@ -1454,8 +1461,15 @@ export class SessionSectionRenderer implements ITreeRenderer<SessionListItem, Fu
 			}));
 		}
 
+		if (element.id === INBOX_ONE_SECTION_ID) {
+			template.elementDisposables.add(autorun(reader => {
+				const activeCustomView = this.customViewService.activeCustomView.read(reader);
+				template.container.classList.toggle('active', activeCustomView?.id === INBOX_ONE_CUSTOM_VIEW_ID);
+			}));
+		}
+
 		template.label.textContent = element.label;
-		if (this.hideSectionCount || element.id === AUTOMATIONS_SECTION_ID) {
+		if (this.hideSectionCount || element.id === AUTOMATIONS_SECTION_ID || element.id === INBOX_ONE_SECTION_ID) {
 			template.count.textContent = '';
 			template.count.style.display = 'none';
 		} else {
@@ -2853,6 +2867,11 @@ export class SessionsList extends Disposable implements ISessionsList {
 				this.commandService.executeCommand('sessionsView.manageAutomations');
 				return;
 			}
+			if (isSessionSection(element) && element.id === INBOX_ONE_SECTION_ID) {
+				this.tree.setSelection([]);
+				this.commandService.executeCommand('inboxOne.showInbox');
+				return;
+			}
 			if (!isSessionSection(element) && !isSessionGroupItem(element)) {
 				// Gate the open on workspace trust before any side effect (mark-read,
 				// activation, folder mount). A refused open leaves the current
@@ -3244,7 +3263,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		};
 
 		const renderSection = (section: ISessionSection): IObjectTreeElement<SessionListItem> => {
-			if (section.id === AUTOMATIONS_SECTION_ID) {
+			if (section.id === AUTOMATIONS_SECTION_ID || section.id === INBOX_ONE_SECTION_ID) {
 				return {
 					element: section as SessionListItem,
 					children: [],
@@ -3310,6 +3329,8 @@ export class SessionsList extends Disposable implements ISessionsList {
 				children: groupChildren,
 			};
 		};
+
+		children.push(renderSection({ id: INBOX_ONE_SECTION_ID, label: localize('inboxOne', "Inbox One"), sessions: [] }));
 
 		if (this.contextKeyService.getContextKeyValue<boolean>(ChatAutomationsEnabledContext.key)) {
 			void this.automationsNewBadgeState.initialize().catch(onUnexpectedError);

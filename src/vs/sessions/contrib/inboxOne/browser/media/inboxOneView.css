@@ -175,6 +175,44 @@
 	border-radius: 6px;
 	background: var(--vscode-list-hoverBackground);
 	font-weight: 600;
+	cursor: pointer;
+}
+
+.inbox-one-diffy:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.inbox-one-diffy.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.inbox-one-diffy-brief {
+	margin: 12px 0;
+	padding: 10px 12px;
+	border-radius: 6px;
+	background: var(--vscode-textBlockQuote-background);
+}
+
+.inbox-one-diffy-brief-line {
+	padding: 3px 0;
+	font-size: 13px;
+}
+
+.inbox-one-diffy-composer {
+	display: flex;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.inbox-one-diffy-input {
+	flex: 1;
+	padding: 6px 10px;
+	border-radius: 4px;
+	border: 1px solid var(--vscode-input-border, transparent);
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	font-size: 13px;
 }
 
 .inbox-one-diffy-badge {
