@@ -41,6 +41,14 @@ function prEvent(): IIngressEvent {
 	return { deliveryId: 'gh-1', source: EventSource.World, repo: 'acme/api', type: 'pull_request', action: 'opened', subject: { kind: 'pr', id: '842' }, receivedAt: 0 };
 }
 
+function issueEvent(): IIngressEvent {
+	return { deliveryId: 'gh-issue-1', source: EventSource.World, repo: 'acme/api', type: 'issues', action: 'opened', subject: { kind: 'issue', id: '17' }, receivedAt: 0 };
+}
+
+function checkEvent(attachedTo: { kind: 'pr' | 'branch'; id: string }, deliveryId: string): IIngressEvent {
+	return { deliveryId, source: EventSource.World, repo: 'acme/api', type: 'check_run', action: 'failed', subject: { kind: 'check', id: deliveryId, attachedTo }, receivedAt: 0 };
+}
+
 /**
  * End-to-end scenario across the real components (coordinator, store, settings,
  * admission, file store, learning), with fakes only at the session boundary.
@@ -158,5 +166,90 @@ suite('Inbox One - end-to-end scenario', () => {
 		// Still present (session preserved); can be restored.
 		const restored = await store.transition(task.id, TaskTrigger.Restore);
 		assert.strictEqual(restored.task!.state, LogicalTaskState.Decision);
+	});
+
+	test('issue-triage scenario: issue event -> task -> grouped meta-issues -> complete', async () => {
+		const { store, settings, engine } = await buildSystem();
+		await settings.enrollRepo({ repo: 'acme/api', active: true });
+		await engine.handleEvent(issueEvent());
+
+		const task = store.tasks.get()[0];
+		assert.strictEqual(task.type, 'issue-triage', 'an issue dispatches the issue-triage role');
+		assert.strictEqual(task.state, LogicalTaskState.Cooking);
+
+		const result = validateWorkerResult({
+			decisionSentence: '5 new issues cluster into 2 themes',
+			claims: [
+				{ text: '3 issues describe the same OAuth timeout', receiptLink: 'https://issues/1', rung: EvidenceRung.SourceLineage },
+				{ text: '2 issues are duplicate crash reports', receiptLink: 'https://issues/2', rung: EvidenceRung.SingleRun },
+			],
+			gapLine: 'severity of the OAuth cluster not yet triaged',
+			actionType: ActionType.CreateIssues,
+			payload: { repo: 'acme/api', issues: [{ title: 'OAuth timeout meta-issue', body: 'Groups #17, #18, #19' }] },
+			label: 'Create issues',
+		});
+		assert.strictEqual(result.ok, true);
+		if (!result.ok) { return; }
+		await store.setEvidence(task.id, result.evidence);
+		const landed = await store.transition(task.id, TaskTrigger.EvidenceAssembled, { tier: InboxOneTier.Fyi });
+		assert.strictEqual(landed.task!.state, LogicalTaskState.Decision);
+		// The proposed CreateIssues action validates against the catalog.
+		const action = landed.task!.evidence!.primaryAction!;
+		assert.strictEqual(validateAction(action.actionType, action.payload).valid, true);
+
+		const accepted = await store.transition(task.id, TaskTrigger.Accept, undefined, { expected: { evidenceRevision: 0 } });
+		assert.strictEqual(accepted.task!.state, LogicalTaskState.Confirming);
+		const completed = await store.transition(task.id, TaskTrigger.ConfirmSucceeded);
+		assert.strictEqual(completed.task!.state, LogicalTaskState.Completed);
+	});
+
+	test('implement-fix scenario: failed check -> task -> fix ready -> complete', async () => {
+		const { store, settings, engine } = await buildSystem();
+		await settings.enrollRepo({ repo: 'acme/api', active: true });
+		// A failed check on a branch (no PR) is its own dispatchable fix task.
+		await engine.handleEvent(checkEvent({ kind: 'branch', id: 'main' }, 'chk-1'));
+
+		const task = store.tasks.get()[0];
+		assert.strictEqual(task.type, 'implement-fix', 'a failed check dispatches the implement-fix role');
+
+		const result = validateWorkerResult({
+			decisionSentence: 'The flaky retry test is fixed',
+			claims: [
+				{ text: 'reproduced the failure 5/5 then 0/20 after the fix', receiptLink: 'https://run/9', rung: EvidenceRung.ReproducibleTest },
+			],
+			gapLine: 'not run under the full matrix',
+			actionType: ActionType.MergePr,
+			payload: { repo: 'acme/api', prNumber: 991, base: 'main', strategy: 'squash' },
+			label: 'Merge fix',
+		});
+		assert.strictEqual(result.ok, true);
+		if (!result.ok) { return; }
+		await store.setEvidence(task.id, result.evidence);
+		const landed = await store.transition(task.id, TaskTrigger.EvidenceAssembled, { tier: InboxOneTier.Urgent });
+		assert.strictEqual(landed.task!.state, LogicalTaskState.Decision);
+		const completed = await store.transition(task.id, TaskTrigger.Accept, undefined, { expected: { evidenceRevision: 0 } })
+			.then(() => store.transition(task.id, TaskTrigger.ConfirmSucceeded));
+		assert.strictEqual(completed.task!.state, LogicalTaskState.Completed);
+	});
+
+	test('cross-role finale: a failed check on an open PR joins the code-review task (I1/G2), no second card', async () => {
+		const { store, settings, engine } = await buildSystem();
+		await settings.enrollRepo({ repo: 'acme/api', active: true });
+
+		// Code-review work starts on PR #842.
+		await engine.handleEvent(prEvent());
+		assert.strictEqual(store.tasks.get().length, 1);
+		const prTask = store.tasks.get()[0];
+		assert.strictEqual(prTask.type, 'code-review');
+
+		// A CI failure lands on the same PR while review work is in flight. It must
+		// attach to the PR's task by group_key -- not mint a second implement-fix
+		// card -- and must not dispatch a redundant second worker.
+		await engine.handleEvent(checkEvent({ kind: 'pr', id: '842' }, 'chk-2'));
+
+		const tasks = store.tasks.get();
+		assert.strictEqual(tasks.length, 1, 'the CI failure joined the PR task; one card, not two');
+		assert.strictEqual(tasks[0].id, prTask.id, 'same LogicalTask owns both roles');
+		assert.strictEqual(tasks[0].groupKey, prTask.groupKey);
 	});
 });

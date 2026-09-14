@@ -8,7 +8,7 @@ import { Action2 } from '../../../../platform/actions/common/actions.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
-import { ActionType, EventSource, EvidenceRung, IIngressEvent, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { ActionType, EventSource, EvidenceRung, IIngressEvent, ILogicalTask, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { rank } from '../common/ranking.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
 import { IEventIngress } from '../common/eventIngress.js';
@@ -165,21 +165,16 @@ export class SimulateWorkerResultAction extends Action2 {
 			return;
 		}
 
-		const n = task.sourceEvent.subject.id;
-		const isReview = task.type === 'code-review';
+		const shaped = buildSyntheticEvidence(task);
 		await store.setEvidence(task.id, {
-			decisionSentence: isReview
-				? localize('inboxOne.reviewReady', 'PR #{0} is ready to approve', n)
-				: localize('inboxOne.fixReady', 'Fix for {0} is green and ready', n),
+			decisionSentence: shaped.decisionSentence,
 			claims: [
 				{ text: localize('inboxOne.claim1', '47/47 checks pass, incl. 3 that were red an hour ago'), receiptLink: 'https://example/run/1', rung: EvidenceRung.SingleRun },
 				{ text: localize('inboxOne.claim2', 'Change limited to the expired-session retry path'), receiptLink: 'https://example/diff/1', rung: EvidenceRung.SourceLineage },
 			],
 			gapLine: localize('inboxOne.gap', 'Not verified: behavior under production load.'),
 			freshness: { headSha: '7a61d9e', computedAt: Date.now() },
-			primaryAction: isReview
-				? { label: localize('inboxOne.approve', 'Approve PR'), actionType: ActionType.ApprovePr, payload: { repo: task.repo, prNumber: Number(n) } }
-				: { label: localize('inboxOne.merge', 'Merge fix'), actionType: ActionType.MergePr, payload: { repo: task.repo, prNumber: Number(n), base: 'main', strategy: 'squash', rerunChecks: true } },
+			primaryAction: shaped.primaryAction,
 		});
 		const ranked = rank({ blocksPeople: 2, evidenceConfidence: 0.9, recipientAffinity: 0.8, urgency: 0.6, perishability: 0.5 });
 		await store.transition(task.id, TaskTrigger.EvidenceAssembled, { tier: ranked.tier, rank: ranked.rank, rankReason: ranked.reason });
@@ -197,6 +192,38 @@ function buildSyntheticEvent(kind: string, repo: string, n: number): IIngressEve
 		case 'pr':
 		default:
 			return { ...base, type: 'pull_request', action: 'opened', subject: { kind: 'pr', id: String(n) } };
+	}
+}
+
+interface IShapedEvidence {
+	readonly decisionSentence: string;
+	readonly primaryAction: { readonly label: string; readonly actionType: ActionType; readonly payload: unknown };
+}
+
+/** Role-faithful synthetic evidence so the dev harness demonstrates each scenario distinctly. */
+function buildSyntheticEvidence(task: ILogicalTask): IShapedEvidence {
+	const subject = task.sourceEvent.subject;
+	const repo = task.repo;
+	// A fix targets the PR the failing check attaches to; other roles use the subject.
+	const displayId = subject.id;
+	const prNumber = Number(subject.attachedTo?.id ?? subject.id);
+	switch (task.type) {
+		case 'issue-triage':
+			return {
+				decisionSentence: localize('inboxOne.triageReady', '5 new issues cluster into 2 themes'),
+				primaryAction: { label: localize('inboxOne.createIssues', 'Create issues'), actionType: ActionType.CreateIssues, payload: { repo, issues: [{ title: `Meta-issue for #${displayId}`, body: localize('inboxOne.metaBody', 'Groups the duplicate reports under one tracking issue.'), sourceIssues: [Number(displayId)] }] } },
+			};
+		case 'implement-fix':
+			return {
+				decisionSentence: localize('inboxOne.fixReady', 'Fix for PR #{0} is green and ready', String(prNumber)),
+				primaryAction: { label: localize('inboxOne.merge', 'Merge fix'), actionType: ActionType.MergePr, payload: { repo, prNumber, base: 'main', strategy: 'squash', rerunChecks: true } },
+			};
+		case 'code-review':
+		default:
+			return {
+				decisionSentence: localize('inboxOne.reviewReady', 'PR #{0} is ready to approve', displayId),
+				primaryAction: { label: localize('inboxOne.approve', 'Approve PR'), actionType: ActionType.ApprovePr, payload: { repo, prNumber: Number(displayId) } },
+			};
 	}
 }
 
