@@ -258,7 +258,15 @@ export class InboxOneView extends AbstractCustomView {
 		if (selected) {
 			row.classList.add('selected');
 		}
-		row.appendChild($('.inbox-one-item-title', undefined, task.evidence?.decisionSentence ?? this.fallbackTitle(task)));
+		const blocked = task.state === LogicalTaskState.Blocked;
+		if (blocked) {
+			row.classList.add('blocked');
+		}
+		const title = row.appendChild($('.inbox-one-item-title'));
+		if (blocked) {
+			title.appendChild($('span.inbox-one-item-blocked-badge', undefined, localize('inboxOne.blockedBadge', '! BLOCKED')));
+		}
+		title.appendChild($('span', undefined, task.evidence?.decisionSentence ?? this.fallbackTitle(task)));
 		const meta = row.appendChild($('.inbox-one-item-meta'));
 		if (task.repo) {
 			meta.appendChild($('span.inbox-one-item-repo', undefined, task.repo));
@@ -280,6 +288,11 @@ export class InboxOneView extends AbstractCustomView {
 
 		if (!task) {
 			detail.appendChild($('.inbox-one-detail-empty', undefined, localize('inboxOne.selectItem', 'Select an item to see its evidence.')));
+			return;
+		}
+
+		if (task.state === LogicalTaskState.Blocked) {
+			this.renderBlockedDetail(detail, task);
 			return;
 		}
 
@@ -316,7 +329,7 @@ export class InboxOneView extends AbstractCustomView {
 			detail.appendChild($('.inbox-one-detail-gap', undefined, pack.gapLine));
 		}
 
-		if (task.state === LogicalTaskState.Decision || task.state === LogicalTaskState.Blocked) {
+		if (task.state === LogicalTaskState.Decision) {
 			detail.appendChild(this.renderDetailActions(task));
 		} else if (task.state === LogicalTaskState.Completed) {
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.completedNote', 'Completed. History preserved.')));
@@ -332,6 +345,39 @@ export class InboxOneView extends AbstractCustomView {
 			this._register(addClick(open, () => this.openWorkerSession(task)));
 			const cancel = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancelWork', 'Cancel work')));
 			this._register(addClick(cancel, () => this.cancelWork(task)));
+		}
+	}
+
+	/**
+	 * The Blocked recovery layout (wireframes 7): a distinct "! BLOCKED" header,
+	 * what is blocked, and the single recovery step, with a primary action that
+	 * supplies the fact/permission (-> back to Cooking), plus Steer and Dismiss.
+	 */
+	private renderBlockedDetail(detail: HTMLElement, task: ILogicalTask): void {
+		const pack = task.evidence;
+		const subject = task.sourceEvent.subject;
+		detail.appendChild($('.inbox-one-detail-blocked-tier', undefined, `\u0021 ${localize('inboxOne.blockedLabel', 'BLOCKED')} \u00b7 ${task.type}`));
+		detail.appendChild($('h2.inbox-one-detail-title', undefined, pack?.decisionSentence ?? this.fallbackTitle(task)));
+		detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo ?? ''}${task.repo ? ' \u00b7 ' : ''}${subject.kind} ${subject.id}`));
+
+		const need = detail.appendChild($('.inbox-one-blocked-need'));
+		need.appendChild($('span.inbox-one-blocked-need-label', undefined, localize('inboxOne.whatINeed', 'What I need: ')));
+		need.appendChild($('span', undefined, task.recoveryStep ?? localize('inboxOne.blockedGeneric', 'a human-only fact or permission to continue.')));
+
+		const actions = detail.appendChild($('.inbox-one-detail-actions'));
+		const supply = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.provideAndRetry', "I've unblocked this")} \u25b8`));
+		this._register(addClick(supply, () => this.recoverySupplied(task)));
+		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
+		this._register(addClick(steer, () => this.steer(task)));
+		const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
+		this._register(addClick(dismiss, () => this.dismiss(task)));
+	}
+
+	/** Human supplied the blocker's fact/permission: retry (Blocked -> Cooking). */
+	private async recoverySupplied(task: ILogicalTask): Promise<void> {
+		const res = await this.store.transition(task.id, TaskTrigger.RecoverySupplied);
+		if (res.task) {
+			this.notificationService.info(localize('inboxOne.unblocked', "Thanks - I'll retry now with that unblocked."));
 		}
 	}
 

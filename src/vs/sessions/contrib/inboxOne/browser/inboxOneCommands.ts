@@ -182,6 +182,46 @@ export class SimulateWorkerResultAction extends Action2 {
 	}
 }
 
+/** Dev: turn a cooking task into a Blocked decision with one recovery step (wireframes 7). */
+export class SimulateWorkerBlockedAction extends Action2 {
+	static readonly ID = 'inboxOne.simulateWorkerBlocked';
+	constructor() {
+		super({
+			id: SimulateWorkerBlockedAction.ID,
+			title: localize2('inboxOne.simulateWorkerBlocked', 'Simulate Worker Blocked (Dev)'),
+			category: INBOX_ONE_CATEGORY,
+			f1: true,
+		});
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const store = accessor.get(IInboxOneStore);
+		const quickInput = accessor.get(IQuickInputService);
+		const notification = accessor.get(INotificationService);
+
+		const cooking = store.tasks.get().filter(t => t.state === LogicalTaskState.Cooking);
+		if (cooking.length === 0) {
+			notification.warn(localize('inboxOne.noCooking', 'No cooking tasks. Simulate a GitHub event first.'));
+			return;
+		}
+		const task = cooking.length === 1
+			? cooking[0]
+			: await quickInput.pick(cooking.map(t => ({ label: t.type + ' ' + t.sourceEvent.subject.id, id: t.id })), { placeHolder: localize('inboxOne.pickTask', 'Cooking task to resolve') }).then(p => cooking.find(t => t.id === p?.id));
+		if (!task) {
+			return;
+		}
+		await store.setEvidence(task.id, {
+			decisionSentence: localize('inboxOne.blockedSentence', "Can't verify CVE reachability without the prod dependency graph"),
+			claims: [{ text: localize('inboxOne.blockedClaim', 'The alert is real but reachability needs the prod lockfile'), receiptLink: 'https://example/alert/77', rung: EvidenceRung.SingleRun }],
+			gapLine: localize('inboxOne.blockedGap', 'Not verified: whether the vulnerable path is reachable in production.'),
+			freshness: { computedAt: Date.now() },
+		});
+		await store.transition(task.id, TaskTrigger.Blocker, {
+			recoveryStep: localize('inboxOne.blockedRecovery', 'read access to the prod lockfile (or confirm it matches the repo lockfile).'),
+		});
+		notification.notify({ severity: Severity.Info, message: localize('inboxOne.blockedNotify', 'Landed as a Blocked decision.') });
+	}
+}
+
 function buildSyntheticEvent(kind: string, repo: string, n: number): IIngressEvent {
 	const base = { deliveryId: `sim-${kind}-${repo}-${n}-${Date.now()}`, source: EventSource.World, repo, receivedAt: Date.now() };
 	switch (kind) {
@@ -229,4 +269,4 @@ function buildSyntheticEvidence(task: ILogicalTask): IShapedEvidence {
 
 export const INBOX_ONE_ACTIONS = [EnrollRepositoryAction, ShowInboxStatusAction];
 /** Dev-only simulator commands: registered only in non-stable builds so their synthetic evidence can never run in production. */
-export const INBOX_ONE_DEV_ACTIONS = [SimulateEventAction, SimulateWorkerResultAction];
+export const INBOX_ONE_DEV_ACTIONS = [SimulateEventAction, SimulateWorkerResultAction, SimulateWorkerBlockedAction];
