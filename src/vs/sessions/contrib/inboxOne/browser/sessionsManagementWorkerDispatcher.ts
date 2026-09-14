@@ -1,0 +1,134 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { URI } from '../../../../base/common/uri.js';
+import { generateUuid } from '../../../../base/common/uuid.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
+import { WorkerRole } from '../common/eventTaxonomy.js';
+import { GroupKey } from '../common/inboxOneTypes.js';
+import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from '../common/workerDispatcher.js';
+
+/** URI scheme for a deferred dispatch when no agent host/target is available yet. */
+const PENDING_SCHEME = 'inboxone-pending';
+
+/** Metadata keys stamped on a dispatched worker session so it resolves back to its task (G15). */
+export const INBOX_ONE_SESSION_META = {
+	role: 'inboxOneRole',
+	groupKey: 'inboxOneGroupKey',
+	taskId: 'inboxOneTaskId',
+	attempt: 'inboxOneAttempt',
+} as const;
+
+function workerTitle(role: WorkerRole, groupKey: GroupKey): string {
+	const subject = groupKey.split(':').slice(1).join(' ');
+	switch (role) {
+		case WorkerRole.CodeReview: return `Review ${subject}`;
+		case WorkerRole.IssueTriage: return `Triage ${subject}`;
+		case WorkerRole.ImplementFix: return `Fix ${subject}`;
+		default: return `Work ${subject}`;
+	}
+}
+
+/**
+ * The production {@link IWorkerDispatcher}: it creates real agent worker sessions
+ * through {@link ISessionsManagementService} (the same harness the New Session
+ * composer uses) and sends the self-contained brief as the first request, without
+ * navigating away from the inbox (`background: true`). The committed session's
+ * resource URI is the provider-neutral `sessionRef` stored on the task attempt,
+ * so session lifecycle events route back to the owning task (G15).
+ *
+ * When no agent host / session target is available (e.g. the Agents Window has no
+ * connected host), dispatch degrades gracefully: it records intent and returns a
+ * `inboxone-pending://` ref so the coordinator loop still advances. A later
+ * dispatch (once a host connects) supersedes it. This keeps the coordinator
+ * host-independent while making the dispatch path real wherever a host exists.
+ */
+export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
+
+	constructor(
+		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
+		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
+		@ILogService private readonly logService: ILogService,
+	) { }
+
+	async dispatch(request: IWorkerDispatchRequest): Promise<IWorkerDispatchResult> {
+		// Warm reuse: relay the new brief into the existing session (re-scoped by
+		// the coordinator's brief, gotcha G7). Fall through to a fresh session if
+		// the prior session is gone.
+		if (request.reuseSessionRef && await this.relaySafely(request.reuseSessionRef, request.brief)) {
+			return { sessionRef: request.reuseSessionRef, reused: true };
+		}
+
+		const folder = this.resolveFolder();
+		if (!folder || !this.sessions.isNewSessionTargetAvailable(folder)) {
+			return this.deferred(request, 'no session target available (no connected agent host)');
+		}
+
+		try {
+			const session = await this.sessions.createAndSendNewChatRequest(
+				folder,
+				{ query: request.brief, title: workerTitle(request.role, request.groupKey), background: true },
+				{
+					metadata: {
+						[INBOX_ONE_SESSION_META.role]: request.role,
+						[INBOX_ONE_SESSION_META.groupKey]: request.groupKey,
+						[INBOX_ONE_SESSION_META.taskId]: request.task.id,
+						[INBOX_ONE_SESSION_META.attempt]: request.attemptIndex,
+					},
+				},
+			);
+			if (!session) {
+				return this.deferred(request, 'session service disposed mid-dispatch');
+			}
+			const sessionRef = session.resource.toString();
+			this.logService.info(`[inboxOne] dispatched ${request.role} worker for ${request.groupKey} -> ${sessionRef}`);
+			return { sessionRef, reused: false };
+		} catch (err) {
+			this.logService.error(`[inboxOne] worker dispatch failed for ${request.groupKey}`, err);
+			return this.deferred(request, 'dispatch threw');
+		}
+	}
+
+	async relay(sessionRef: string, message: string): Promise<void> {
+		if (!await this.relaySafely(sessionRef, message)) {
+			this.logService.warn(`[inboxOne] relay target ${sessionRef} not found`);
+		}
+	}
+
+	private deferred(request: IWorkerDispatchRequest, reason: string): IWorkerDispatchResult {
+		const sessionRef = `${PENDING_SCHEME}://worker/${generateUuid()}`;
+		this.logService.info(`[inboxOne] deferring ${request.role} dispatch for ${request.groupKey}: ${reason} (${sessionRef})`);
+		return { sessionRef, reused: false };
+	}
+
+	private async relaySafely(sessionRef: string, message: string): Promise<boolean> {
+		if (sessionRef.startsWith(`${PENDING_SCHEME}:`)) {
+			return false;
+		}
+		let uri: URI;
+		try {
+			uri = URI.parse(sessionRef);
+		} catch {
+			return false;
+		}
+		const session = this.sessions.getSession(uri);
+		if (!session) {
+			return false;
+		}
+		try {
+			await this.sessions.sendRequest(session, session.mainChat.get(), { query: message, background: true });
+			return true;
+		} catch (err) {
+			this.logService.warn(`[inboxOne] relay to ${sessionRef} failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
+		}
+	}
+
+	private resolveFolder(): URI | undefined {
+		return this.workspaceContext.getWorkspace().folders[0]?.uri;
+	}
+}

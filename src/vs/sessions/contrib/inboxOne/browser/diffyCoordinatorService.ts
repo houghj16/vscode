@@ -5,6 +5,7 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IAutomationStorageService } from '../../automations/common/automationStorageService.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { CoordinatorEngine } from '../common/coordinatorEngine.js';
 import { IDiffyCoordinatorService } from '../common/diffyCoordinator.js';
@@ -14,7 +15,7 @@ import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IIngressEvent } from '../common/inboxOneTypes.js';
 import { IWorkerDispatcher } from '../common/workerDispatcher.js';
 import { LiveAdmissionManager } from './liveAdmissionManager.js';
-import { StubWorkerDispatcher } from './stubWorkerDispatcher.js';
+import { SessionsManagementWorkerDispatcher } from './sessionsManagementWorkerDispatcher.js';
 
 /** MVP: a single personal inbox per user (design 7.7). Multi-inbox/team routing is deferred. */
 const PERSONAL_INBOX_ID = 'my';
@@ -41,11 +42,12 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 		@IInboxOneStore private readonly store: IInboxOneStore,
 		@IInboxOneSettings private readonly settings: IInboxOneSettings,
 		@IAutomationStorageService storage: IAutomationStorageService,
+		@IInstantiationService instantiationService: IInstantiationService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 		const admission = new LiveAdmissionManager(this.store, this.settings, storage);
-		const dispatcher: IWorkerDispatcher = new StubWorkerDispatcher(this.logService);
+		const dispatcher: IWorkerDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher);
 		this.engine = new CoordinatorEngine(this.inboxId, this.store, this.settings, admission, dispatcher, this.logService);
 
 		this.ready = this.settings.initialize();
