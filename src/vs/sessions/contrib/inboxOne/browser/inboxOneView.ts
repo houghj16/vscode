@@ -13,7 +13,7 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { AbstractCustomView } from '../../../services/customView/browser/customView.js';
 import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
-import { IInboxOneStore } from '../common/inboxOneStore.js';
+import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
 import { ActionType, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
 
@@ -48,6 +48,8 @@ export class InboxOneView extends AbstractCustomView {
 	override readonly description: IObservable<string | undefined>;
 
 	private readonly selectedTaskId: ISettableObservable<string | undefined> = observableValue('inboxOneSelected', undefined);
+	/** A task referenced into the Diffy thread (steer/reopen), with the intent verb. */
+	private readonly diffyReference: ISettableObservable<{ readonly taskId: string; readonly intent: 'steer' | 'reopen' } | undefined> = observableValue('inboxOneDiffyRef', undefined);
 	private listEl: HTMLElement | undefined;
 	private detailEl: HTMLElement | undefined;
 	private confirmPanel: HTMLElement | undefined;
@@ -84,6 +86,7 @@ export class InboxOneView extends AbstractCustomView {
 		this._register(autorun(reader => {
 			const tasks = this.store.tasks.read(reader);
 			const selected = this.selectedTaskId.read(reader);
+			this.diffyReference.read(reader);
 			this.renderList(tasks, selected);
 			if (selected === DIFFY_SELECTION) {
 				this.renderDiffyDetail(tasks);
@@ -115,21 +118,55 @@ export class InboxOneView extends AbstractCustomView {
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefCooking', '{0} cooking', cooking.length)));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefAuto', '{0} auto-handled and logged', autoHandled.length)));
 
-		const composer = detail.appendChild($('.inbox-one-diffy-composer'));
-		const input = composer.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
+		const reference = this.diffyReference.get();
+		const referencedTask = reference ? tasks.find(t => t.id === reference.taskId) : undefined;
+		const composer = detail.appendChild($('.inbox-one-diffy-composer-wrap'));
+		if (reference && referencedTask) {
+			const chip = composer.appendChild($('.inbox-one-ref-chip'));
+			chip.appendChild($('span.inbox-one-ref-chip-label', undefined, `\u27e6 ${referencedTask.evidence?.decisionSentence ?? referencedTask.type} \u27e7`));
+			const remove = chip.appendChild($('span.inbox-one-ref-chip-remove', undefined, '\u2715'));
+			this._register(addClick(remove, () => this.diffyReference.set(undefined, undefined)));
+		}
+		const composerRow = composer.appendChild($('.inbox-one-diffy-composer'));
+		const input = composerRow.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
 		input.type = 'text';
-		input.placeholder = localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
-		const send = composer.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.send', 'Send')));
+		input.placeholder = reference
+			? (reference.intent === 'reopen' ? localize('inboxOne.reopenPrompt', 'Reopen this and ...') : localize('inboxOne.steerPrompt', 'The work was wrong - ...'))
+			: localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
+		if (reference?.intent === 'reopen') {
+			input.value = localize('inboxOne.reopenDraft', 'Reopen this and ');
+		}
+		const send = composerRow.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.send', 'Send')));
 		const submit = () => {
 			const text = input.value.trim();
 			if (!text) {
 				return;
 			}
 			input.value = '';
-			this.notificationService.info(localize('inboxOne.diffyReply', 'Diffy: {0}', this.diffyReply(text, decisions.length, cooking.length, repos.size)));
+			if (reference && referencedTask) {
+				this.diffyReference.set(undefined, undefined);
+				void this.continueTask(referencedTask, reference.intent, text);
+			} else {
+				this.notificationService.info(localize('inboxOne.diffyReply', 'Diffy: {0}', this.diffyReply(text, decisions.length, cooking.length, repos.size)));
+			}
 		};
 		this._register(addClick(send, submit));
 		this._register(addKeydown(input, 'Enter', submit));
+	}
+
+	/** The reference-into-Diffy continuation (design 3.6): steer/reopen -> back to Cooking, same task. */
+	private async continueTask(task: ILogicalTask, intent: 'steer' | 'reopen', message: string): Promise<void> {
+		const continuationKey = `${task.id}:${intent}:${Date.now()}`;
+		const trigger = intent === 'reopen' ? TaskTrigger.Reopen : TaskTrigger.Steer;
+		const res = await this.store.openContinuation(task.id, trigger, continuationKey);
+		if (res.outcome === TransitionOutcome.Applied && !res.fencedNoop) {
+			this.selectedTaskId.set(task.id, undefined);
+			this.notificationService.info(intent === 'reopen'
+				? localize('inboxOne.reopened', 'Diffy reopened this - now Cooking. ({0})', message)
+				: localize('inboxOne.steered', 'Diffy is re-working this with your steer - now Cooking.'));
+		} else {
+			this.notificationService.warn(localize('inboxOne.continueFailed', 'Could not continue this task from its current state.'));
+		}
 	}
 
 	private diffyReply(prompt: string, needYou: number, cooking: number, repos: number): string {
@@ -229,7 +266,32 @@ export class InboxOneView extends AbstractCustomView {
 			detail.appendChild(this.renderDetailActions(task));
 		} else if (task.state === LogicalTaskState.Completed) {
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.completedNote', 'Completed. History preserved.')));
+			const actions = detail.appendChild($('.inbox-one-detail-actions'));
+			const reopen = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.reopen', 'Reopen with Diffy')));
+			this._register(addClick(reopen, () => this.referenceIntoDiffy(task, 'reopen')));
+			const archive = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.archiveBtn', 'Archive')));
+			this._register(addClick(archive, () => this.dismiss(task)));
+		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
+			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.cookingNote', 'Diffy is working on this. Evidence will land here when ready.')));
+			const actions = detail.appendChild($('.inbox-one-detail-actions'));
+			const cancel = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancelWork', 'Cancel work')));
+			this._register(addClick(cancel, () => this.cancelWork(task)));
 		}
+	}
+
+	/** Steer (design 3.4): item-initiated, Diffy-mediated -> open Diffy scoped to this item. */
+	private steer(task: ILogicalTask): void {
+		this.referenceIntoDiffy(task, 'steer');
+	}
+
+	/** The reference-into-Diffy transition (design 3.6): select Diffy with the item attached. */
+	private referenceIntoDiffy(task: ILogicalTask, intent: 'steer' | 'reopen'): void {
+		this.diffyReference.set({ taskId: task.id, intent }, undefined);
+		this.selectedTaskId.set(DIFFY_SELECTION, undefined);
+	}
+
+	private async cancelWork(task: ILogicalTask): Promise<void> {
+		await this.store.transition(task.id, TaskTrigger.CancelWork, { archiveReason: 'cancelled from inbox' });
 	}
 
 	private renderDetailActions(task: ILogicalTask): HTMLElement {
@@ -239,7 +301,7 @@ export class InboxOneView extends AbstractCustomView {
 		this._register(addClick(accept, () => this.confirmAndAccept(task)));
 
 		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
-		this._register(addClick(steer, () => this.notificationService.info(localize('inboxOne.steerTodo', 'Steer opens Diffy scoped to this item (coming next).'))));
+		this._register(addClick(steer, () => this.steer(task)));
 
 		const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
 		this._register(addClick(dismiss, () => this.dismiss(task)));
