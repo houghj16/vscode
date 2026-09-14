@@ -11,6 +11,7 @@ import { localize } from '../../../../nls.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { AbstractCustomView } from '../../../services/customView/browser/customView.js';
 import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
@@ -26,6 +27,9 @@ interface ITierSpec {
 
 /** Sentinel selection value for the pinned Diffy coordinator entry. */
 const DIFFY_SELECTION = '__diffy__';
+
+/** Storage key for the persisted set of collapsed section keys. */
+const COLLAPSED_SECTIONS_KEY = 'inboxOne.collapsedSections';
 
 /** The inbox sections in display order (design 3.1). */
 const SECTIONS: readonly ITierSpec[] = [
@@ -62,13 +66,31 @@ export class InboxOneView extends AbstractCustomView {
 		@INotificationService private readonly notificationService: INotificationService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IStorageService private readonly storageService: IStorageService,
 	) {
 		super();
+		for (const key of this.loadCollapsedSections()) {
+			this.collapsedSections.add(key);
+		}
 		this.description = this.store.tasks.map(tasks => {
 			const cooking = tasks.filter(t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming).length;
 			const decisions = tasks.filter(t => t.state === LogicalTaskState.Decision || t.state === LogicalTaskState.Blocked).length;
 			return localize('inboxOne.desc', 'Diffy - {0} need you, {1} cooking', decisions, cooking);
 		});
+	}
+
+	private loadCollapsedSections(): readonly string[] {
+		try {
+			const raw = this.storageService.get(COLLAPSED_SECTIONS_KEY, StorageScope.APPLICATION);
+			const parsed = raw ? JSON.parse(raw) : [];
+			return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === 'string') : [];
+		} catch {
+			return [];
+		}
+	}
+
+	private persistCollapsedSections(): void {
+		this.storageService.store(COLLAPSED_SECTIONS_KEY, JSON.stringify([...this.collapsedSections]), StorageScope.APPLICATION, StorageTarget.USER);
 	}
 
 	render(container: HTMLElement): void {
@@ -141,7 +163,7 @@ export class InboxOneView extends AbstractCustomView {
 		const input = composerRow.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
 		input.type = 'text';
 		input.placeholder = reference
-			? (reference.intent === 'reopen' ? localize('inboxOne.reopenPrompt', 'Reopen this and ...') : localize('inboxOne.steerPrompt', "Here's how you can make it better ..."))
+			? (reference.intent === 'reopen' ? localize('inboxOne.reopenPrompt', 'Reopen this and ...') : localize('inboxOne.steerPrompt', "Here's how you can make it better..."))
 			: localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
 		if (reference?.intent === 'reopen') {
 			input.value = localize('inboxOne.reopenDraft', 'Reopen this and ');
@@ -218,6 +240,7 @@ export class InboxOneView extends AbstractCustomView {
 				} else {
 					this.collapsedSections.add(section.key);
 				}
+				this.persistCollapsedSections();
 				this.renderList(this.store.tasks.get(), this.selectedTaskId.get());
 			}));
 			if (collapsed) {
@@ -241,6 +264,9 @@ export class InboxOneView extends AbstractCustomView {
 			meta.appendChild($('span.inbox-one-item-repo', undefined, task.repo));
 		}
 		meta.appendChild($('span.inbox-one-item-reason', undefined, task.rankReason ?? this.stateLabel(task.state)));
+		if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
+			row.appendChild(this.renderCookingStages(task, true));
+		}
 		this._register(addClick(row, () => this.selectedTaskId.set(task.id, undefined)));
 		return row;
 	}
@@ -296,7 +322,6 @@ export class InboxOneView extends AbstractCustomView {
 			const archive = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.archiveBtn', 'Archive')));
 			this._register(addClick(archive, () => this.dismiss(task)));
 		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
-			detail.appendChild(this.renderCookingStages(task));
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.cookingNote', 'Diffy is working on this. Evidence will land here when ready.')));
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
 			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
@@ -306,9 +331,16 @@ export class InboxOneView extends AbstractCustomView {
 		}
 	}
 
-	/** The three cooking stages (wireframes 6): Triggered -> Doing work -> Assembling evidence. */
-	private renderCookingStages(task: ILogicalTask): HTMLElement {
+	/**
+	 * The three cooking stages (wireframes 6): Triggered -> Doing work ->
+	 * Assembling evidence. Shown in the left list preview; `compact` drops the
+	 * role/elapsed meta line for the tighter row layout.
+	 */
+	private renderCookingStages(task: ILogicalTask, compact = false): HTMLElement {
 		const wrap = $('.inbox-one-cooking');
+		if (compact) {
+			wrap.classList.add('compact');
+		}
 		const active = task.state === LogicalTaskState.Confirming ? 2 : 1;
 		const labels = [
 			localize('inboxOne.stageTriggered', 'Triggered'),
@@ -325,9 +357,11 @@ export class InboxOneView extends AbstractCustomView {
 			stage.appendChild($('span.inbox-one-cooking-dot', undefined, state === 'pending' ? '\u25cb' : '\u25cf'));
 			stage.appendChild($('span', undefined, label));
 		});
-		const attempt = task.attempts[task.currentAttempt];
-		const elapsed = formatElapsed(Date.now() - (attempt?.startedAt ?? task.createdAt));
-		wrap.appendChild($('.inbox-one-cooking-meta', undefined, `\u25b2 ${task.type} \u00b7 ${elapsed}`));
+		if (!compact) {
+			const attempt = task.attempts[task.currentAttempt];
+			const elapsed = formatElapsed(Date.now() - (attempt?.startedAt ?? task.createdAt));
+			wrap.appendChild($('.inbox-one-cooking-meta', undefined, `\u25b2 ${task.type} \u00b7 ${elapsed}`));
+		}
 		return wrap;
 	}
 

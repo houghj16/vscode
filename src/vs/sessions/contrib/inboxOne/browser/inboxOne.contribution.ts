@@ -21,7 +21,7 @@ import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { DiffyCoordinatorService } from './diffyCoordinatorService.js';
 import { EventIngress } from './eventIngress.js';
-import { INBOX_ONE_ACTIONS } from './inboxOneCommands.js';
+import { INBOX_ONE_ACTIONS, INBOX_ONE_DEV_ACTIONS } from './inboxOneCommands.js';
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
@@ -46,6 +46,13 @@ registerSingleton(IDiffyCoordinatorService, DiffyCoordinatorService, Instantiati
 // --- commands (command palette) ---
 for (const action of INBOX_ONE_ACTIONS) {
 	registerAction2(action);
+}
+// Dev-only simulator commands: never registered in stable builds, so their
+// synthetic (hardcoded) evidence can never be triggered in production.
+if (product.quality !== 'stable') {
+	for (const action of INBOX_ONE_DEV_ACTIONS) {
+		registerAction2(action);
+	}
 }
 
 /** Registers the tiered inbox custom view. */

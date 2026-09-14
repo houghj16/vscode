@@ -283,6 +283,21 @@
 	margin: 6px 0 14px 0;
 }
 
+.inbox-one-cooking.compact {
+	margin: 4px 0 0 0;
+	font-size: 11px;
+}
+
+.inbox-one-cooking.compact .inbox-one-cooking-stage {
+	font-size: 11px;
+	gap: 4px;
+}
+
+.inbox-one-cooking.compact .inbox-one-cooking-rail {
+	flex-basis: 10px;
+	min-width: 8px;
+}
+
 .inbox-one-cooking-stages {
 	display: flex;
 	align-items: center;
@@ -566,9 +581,56 @@
 }
 
 .inbox-one-skill-body {
-	white-space: pre-wrap;
 	font-size: 13px;
-	line-height: 1.4;
+	line-height: 1.5;
 	padding: 8px 0;
 	color: var(--vscode-foreground);
+}
+
+.inbox-one-skill-body h1,
+.inbox-one-skill-body h2,
+.inbox-one-skill-body h3 {
+	margin: 12px 0 6px 0;
+}
+
+.inbox-one-skill-body ul,
+.inbox-one-skill-body ol {
+	padding-left: 20px;
+}
+
+.inbox-one-skill-body code {
+	font-family: var(--monaco-monospace-font);
+	font-size: 12px;
+}
+
+.inbox-one-skill-raw {
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--monaco-monospace-font);
+	font-size: 12px;
+	line-height: 1.45;
+	margin: 0;
+	color: var(--vscode-foreground);
+}
+
+.inbox-one-skill-toggle {
+	display: flex;
+	gap: 4px;
+	margin: 4px 0 8px 0;
+}
+
+.inbox-one-toggle-btn {
+	padding: 3px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--vscode-checkbox-border, var(--vscode-panel-border, transparent));
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.inbox-one-toggle-btn.on {
+	background: var(--vscode-inputOption-activeBackground, var(--vscode-button-background));
+	color: var(--vscode-inputOption-activeForeground, var(--vscode-button-foreground));
+	border-color: var(--vscode-focusBorder, transparent);
 }

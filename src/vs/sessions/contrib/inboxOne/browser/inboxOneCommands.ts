@@ -227,4 +227,6 @@ function buildSyntheticEvidence(task: ILogicalTask): IShapedEvidence {
 	}
 }
 
-export const INBOX_ONE_ACTIONS = [EnrollRepositoryAction, ShowInboxStatusAction, SimulateEventAction, SimulateWorkerResultAction];
+export const INBOX_ONE_ACTIONS = [EnrollRepositoryAction, ShowInboxStatusAction];
+/** Dev-only simulator commands: registered only in non-stable builds so their synthetic evidence can never run in production. */
+export const INBOX_ONE_DEV_ACTIONS = [SimulateEventAction, SimulateWorkerResultAction];
