@@ -21,10 +21,22 @@ const TRIGGER_FAMILIES: readonly { readonly family: TriggerFamily; readonly labe
 	{ family: TriggerFamily.AgentSessions, label: localize('inboxOne.trSessions', 'Agent sessions') },
 ];
 
-const AUTONOMY_LEVELS: readonly { readonly level: AutonomyLevel; readonly label: string }[] = [
-	{ level: AutonomyLevel.Nothing, label: localize('inboxOne.autoNothing', 'Nothing') },
-	{ level: AutonomyLevel.SafeReversible, label: localize('inboxOne.autoSafe', 'Safe & reversible') },
-	{ level: AutonomyLevel.PlusMedium, label: localize('inboxOne.autoMedium', '+ Medium') },
+const AUTONOMY_LEVELS: readonly { readonly level: AutonomyLevel; readonly label: string; readonly desc: string }[] = [
+	{
+		level: AutonomyLevel.Nothing,
+		label: localize('inboxOne.autoNothing', 'Ask me first'),
+		desc: localize('inboxOne.autoNothingDesc', 'Diffy never acts on its own. Every action waits for your approval.'),
+	},
+	{
+		level: AutonomyLevel.SafeReversible,
+		label: localize('inboxOne.autoSafe', 'Safe, reversible actions'),
+		desc: localize('inboxOne.autoSafeDesc', 'Diffy auto-does low-risk, undoable actions (add labels, comment). Anything else asks.'),
+	},
+	{
+		level: AutonomyLevel.PlusMedium,
+		label: localize('inboxOne.autoMedium', 'Safe + medium-risk actions'),
+		desc: localize('inboxOne.autoMediumDesc', 'Also auto-does medium-risk actions (approve or merge a green PR). Irreversible actions still ask.'),
+	},
 ];
 
 /**
@@ -103,8 +115,13 @@ export class InboxOneSettingsView extends AbstractCustomView {
 		const radios = section.appendChild($('.inbox-one-settings-radios'));
 		const current = this.settings.getDefaultAutonomy();
 		for (const a of AUTONOMY_LEVELS) {
-			const btn = radios.appendChild($(`button.inbox-one-trigger${a.level === current ? '.on' : ''}`, undefined, `${a.level === current ? '\u25c9 ' : '\u25cb '}${a.label}`));
-			this._register(addClick(btn, () => void this.settings.setDefaultAutonomy(a.level)));
+			const selected = a.level === current;
+			const option = radios.appendChild($(`button.inbox-one-autonomy-option${selected ? '.on' : ''}`));
+			const head = option.appendChild($('.inbox-one-autonomy-label'));
+			head.appendChild($('span.inbox-one-autonomy-mark', undefined, selected ? '\u25c9' : '\u25cb'));
+			head.appendChild($('span', undefined, a.label));
+			option.appendChild($('.inbox-one-autonomy-desc', undefined, a.desc));
+			this._register(addClick(option, () => void this.settings.setDefaultAutonomy(a.level)));
 		}
 	}
 

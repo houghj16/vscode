@@ -77,7 +77,7 @@ class ShowInboxAction extends Action2 {
 		super({
 			id: 'inboxOne.showInbox',
 			title: localize2('inboxOne.showInbox', 'Show Inbox'),
-			category: localize2('inboxOne.category', 'Inbox One'),
+			category: localize2('inboxOne.category', 'Inbox'),
 			f1: true,
 		});
 	}
@@ -93,7 +93,7 @@ class ShowSettingsAction extends Action2 {
 		super({
 			id: 'inboxOne.showSettings',
 			title: localize2('inboxOne.showSettings', 'Coordinator Settings'),
-			category: localize2('inboxOne.category', 'Inbox One'),
+			category: localize2('inboxOne.category', 'Inbox'),
 			f1: true,
 		});
 	}
@@ -109,7 +109,7 @@ class ShowSkillsAction extends Action2 {
 		super({
 			id: 'inboxOne.showSkills',
 			title: localize2('inboxOne.showSkills', 'Skills & Roles'),
-			category: localize2('inboxOne.category', 'Inbox One'),
+			category: localize2('inboxOne.category', 'Inbox'),
 			f1: true,
 		});
 	}
@@ -147,7 +147,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	id: 'inboxOne',
 	order: 100,
 	type: 'object',
-	title: localize('inboxOne.title', "Inbox One"),
+	title: localize('inboxOne.title', "Inbox"),
 	properties: {
 		[INBOX_ONE_ENABLED_SETTING]: {
 			type: 'boolean',

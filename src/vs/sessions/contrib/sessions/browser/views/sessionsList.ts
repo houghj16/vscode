@@ -3330,7 +3330,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 			};
 		};
 
-		children.push(renderSection({ id: INBOX_ONE_SECTION_ID, label: localize('inboxOne', "Inbox One"), sessions: [] }));
+		children.push(renderSection({ id: INBOX_ONE_SECTION_ID, label: localize('inboxOne', "Inbox"), sessions: [] }));
 
 		if (this.contextKeyService.getContextKeyValue<boolean>(ChatAutomationsEnabledContext.key)) {
 			void this.automationsNewBadgeState.initialize().catch(onUnexpectedError);

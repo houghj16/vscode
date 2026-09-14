@@ -45,7 +45,7 @@ const SECTIONS: readonly ITierSpec[] = [
  */
 export class InboxOneView extends AbstractCustomView {
 
-	readonly title: IObservable<string> = constObservable(localize('inboxOne.title', 'Inbox One'));
+	readonly title: IObservable<string> = constObservable(localize('inboxOne.title', 'Inbox'));
 	override readonly description: IObservable<string | undefined>;
 
 	private readonly selectedTaskId: ISettableObservable<string | undefined> = observableValue('inboxOneSelected', undefined);
@@ -139,7 +139,7 @@ export class InboxOneView extends AbstractCustomView {
 		const input = composerRow.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
 		input.type = 'text';
 		input.placeholder = reference
-			? (reference.intent === 'reopen' ? localize('inboxOne.reopenPrompt', 'Reopen this and ...') : localize('inboxOne.steerPrompt', 'The work was wrong - ...'))
+			? (reference.intent === 'reopen' ? localize('inboxOne.reopenPrompt', 'Reopen this and ...') : localize('inboxOne.steerPrompt', "Here's how you can make it better ..."))
 			: localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
 		if (reference?.intent === 'reopen') {
 			input.value = localize('inboxOne.reopenDraft', 'Reopen this and ');

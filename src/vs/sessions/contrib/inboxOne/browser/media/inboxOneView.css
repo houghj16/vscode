@@ -400,6 +400,49 @@
 	margin: 4px 0 12px 0;
 }
 
+.inbox-one-settings-section .inbox-one-settings-radios {
+	flex-direction: column;
+	flex-wrap: nowrap;
+	align-items: stretch;
+}
+
+.inbox-one-autonomy-option {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	text-align: left;
+	padding: 8px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--vscode-checkbox-border, var(--vscode-panel-border, transparent));
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	cursor: pointer;
+}
+
+.inbox-one-autonomy-option.on {
+	background: var(--vscode-inputOption-activeBackground, var(--vscode-button-background));
+	color: var(--vscode-inputOption-activeForeground, var(--vscode-button-foreground));
+	border-color: var(--vscode-focusBorder, var(--vscode-inputOption-activeBorder, transparent));
+}
+
+.inbox-one-autonomy-label {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.inbox-one-autonomy-mark {
+	opacity: 0.9;
+}
+
+.inbox-one-autonomy-desc {
+	font-size: 12px;
+	opacity: 0.85;
+	margin-left: 20px;
+}
+
 .inbox-one-trigger {
 	padding: 4px 10px;
 	border-radius: 12px;

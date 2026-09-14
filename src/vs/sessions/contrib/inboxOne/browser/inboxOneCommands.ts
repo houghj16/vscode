@@ -15,7 +15,7 @@ import { IEventIngress } from '../common/eventIngress.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 
-const INBOX_ONE_CATEGORY = localize2('inboxOne.category', 'Inbox One');
+const INBOX_ONE_CATEGORY = localize2('inboxOne.category', 'Inbox');
 
 /** Enroll a repository so Diffy watches it (design 11). */
 export class EnrollRepositoryAction extends Action2 {
