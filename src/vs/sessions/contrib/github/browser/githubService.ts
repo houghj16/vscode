@@ -89,6 +89,15 @@ export interface IGitHubService {
 	getRecentAuthoredPullRequests(owner: string, repo: string, token: CancellationToken): Promise<readonly IGitHubRecentPullRequest[]>;
 	getPullRequestReviewThreads(owner: string, repo: string, pullRequestNumber: number, token: CancellationToken): Promise<readonly IGitHubRecentPullRequestReviewThread[]>;
 	getIssuesWithLinkedPullRequests(owner: string, repo: string, issueNumbers: readonly number[], token: CancellationToken): Promise<ReadonlySet<number>>;
+
+	/**
+	 * Minimal authenticated REST passthrough (`method` + `path` + optional JSON
+	 * body) using the viewer's GitHub session. Intended for callers that need a
+	 * generic REST call not covered by the typed methods above (e.g. Inbox One's
+	 * downtime backfill and webhook registration). Returns the parsed body and
+	 * status code; never throws for a non-2xx (inspect `statusCode`).
+	 */
+	requestRest<T>(method: string, path: string, body?: unknown): Promise<{ readonly data: T | undefined; readonly statusCode: number }>;
 }
 
 export const IGitHubService = createDecorator<IGitHubService>('sessionsGitHubService');
@@ -249,6 +258,11 @@ export class GitHubService extends Disposable implements IGitHubService {
 
 	getIssuesWithLinkedPullRequests(owner: string, repo: string, issueNumbers: readonly number[], token: CancellationToken): Promise<ReadonlySet<number>> {
 		return this._recentUserWorkFetcher.getIssuesWithLinkedPullRequests(owner, repo, issueNumbers, token);
+	}
+
+	async requestRest<T>(method: string, path: string, body?: unknown): Promise<{ readonly data: T | undefined; readonly statusCode: number }> {
+		const response = await this._apiClient.request<T>(method, path, 'inboxOne.rest', body !== undefined ? { data: body } : undefined);
+		return { data: response.data, statusCode: response.statusCode };
 	}
 
 	getChangedFiles(owner: string, repo: string, base: string, head: string): Promise<readonly IGitHubChangedFile[]> {
