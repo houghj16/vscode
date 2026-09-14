@@ -5,7 +5,9 @@
 
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 import { IGitHubService } from '../../github/browser/githubService.js';
 import { IEventIngress } from '../common/eventIngress.js';
 import { fetchBackfillPage } from '../common/githubBackfillFetcher.js';
@@ -13,18 +15,15 @@ import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IDropLedgerEntry, IIngressEvent } from '../common/inboxOneTypes.js';
 import { IBackfillFetcher, IBackfillPage, IReceiverAdapter, IWebhookIngressHost, WebhookIngress } from '../common/webhookIngress.js';
+import { FileDropReceiverAdapter } from './fileDropReceiverAdapter.js';
 
 /**
- * The receiver adapter for the client MVP. The steady-state webhook transport is
- * a localhost HTTP receiver exposed over a dev tunnel, which requires the desktop
- * host + a registered GitHub webhook; that physical assembly is not wired here.
- *
- * What IS wired: app startup is treated as a downtime recovery, so this adapter
- * reports connected once on {@link start}. That single `false -> true` transition
- * drives exactly one backfill (the spec's "poll once on recovery, never
- * periodically"), catching up on repo activity created while the app was closed.
- * No deliveries are forwarded (no live receiver yet), and it never reports
- * connected again, so there is no steady-state polling.
+ * A fallback receiver used only when no local disk provider exists (a pure web
+ * harness): app startup is treated as a downtime recovery, so this adapter reports
+ * connected once on {@link start}. That single `false -> true` transition drives
+ * exactly one backfill (the spec's "poll once on recovery, never periodically"),
+ * catching up on repo activity created while the app was closed. It forwards no
+ * live deliveries and never reports connected again, so there is no polling.
  */
 class StartupRecoveryReceiverAdapter extends Disposable implements IReceiverAdapter {
 	private readonly _onConnectivityChange = this._register(new Emitter<boolean>());
@@ -79,6 +78,8 @@ export class WebhookIngressService extends Disposable {
 		@IInboxOneStore store: IInboxOneStore,
 		@IInboxOneSettings settings: IInboxOneSettings,
 		@IGitHubService github: IGitHubService,
+		@IFileService fileService: IFileService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 		@ILogService logService: ILogService,
 	) {
 		super();
@@ -89,8 +90,16 @@ export class WebhookIngressService extends Disposable {
 			setCursor: (repo: string, cursor: string) => store.setCursor(repo, cursor),
 			enrolledRepos: () => settings.listEnrollments().filter(e => e.active).map(e => e.repo),
 		};
+		// The physical receiver runs in a companion node process that HMAC-verifies
+		// each GitHub delivery and drops it into a watched directory; this adapter
+		// re-emits those into the tested WebhookIngress orchestration. It degrades to
+		// a startup-only recovery (one backfill, no live deliveries) where no local
+		// disk provider exists (a pure web harness).
+		const receiver: IReceiverAdapter = fileService.hasProvider(environmentService.userRoamingDataHome)
+			? new FileDropReceiverAdapter(FileDropReceiverAdapter.dropDirectoryFor(environmentService.userRoamingDataHome), fileService, logService)
+			: new StartupRecoveryReceiverAdapter();
 		const webhook = this._register(new WebhookIngress(
-			this._register(new StartupRecoveryReceiverAdapter()),
+			this._register(receiver),
 			new GitHubBackfillFetcher(github, logService),
 			host,
 			logService,
@@ -99,6 +108,6 @@ export class WebhookIngressService extends Disposable {
 		settings.initialize()
 			.then(() => webhook.start())
 			.catch(err => logService.error('[inboxOne] webhook ingress start failed', err));
-		logService.trace('[inboxOne] webhook ingress ready (startup backfill + steady-state webhooks; no periodic polling)');
+		logService.trace('[inboxOne] webhook ingress ready (drop receiver + startup backfill; no periodic polling)');
 	}
 }
