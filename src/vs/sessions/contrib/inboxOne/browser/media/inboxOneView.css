@@ -7,8 +7,163 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
-	overflow: auto;
+	overflow: hidden;
 	padding: 8px 0;
+}
+
+.inbox-one-panes {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	gap: 8px;
+}
+
+.inbox-one-left {
+	flex: 0 0 42%;
+	max-width: 480px;
+	display: flex;
+	flex-direction: column;
+	overflow: auto;
+	border-right: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.inbox-one-detail {
+	flex: 1;
+	overflow: auto;
+	padding: 12px 20px;
+}
+
+.inbox-one-detail-empty {
+	color: var(--vscode-descriptionForeground);
+	padding: 40px 8px;
+	text-align: center;
+}
+
+.inbox-one-detail-tier {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-detail-title {
+	margin: 4px 0 2px 0;
+	font-size: 18px;
+}
+
+.inbox-one-detail-sub {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	margin-bottom: 10px;
+}
+
+.inbox-one-detail-accepting {
+	font-size: 13px;
+	margin-bottom: 12px;
+	padding: 6px 10px;
+	border-radius: 4px;
+	background: var(--vscode-textBlockQuote-background);
+}
+
+.inbox-one-detail-claims-header {
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.inbox-one-claim {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+	padding: 3px 0;
+	font-size: 13px;
+}
+
+.inbox-one-claim-bullet {
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-claim-receipt {
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.inbox-one-claim-receipt:hover {
+	text-decoration: underline;
+}
+
+.inbox-one-detail-gap {
+	margin: 10px 0;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.inbox-one-detail-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.inbox-one-detail-done {
+	margin-top: 16px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-confirm {
+	margin-top: 16px;
+	padding: 12px 14px;
+	border-radius: 6px;
+	border: 1px solid var(--vscode-panel-border, transparent);
+	background: var(--vscode-editorWidget-background);
+}
+
+.inbox-one-confirm.irreversible {
+	border-color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.inbox-one-confirm-title {
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+
+.inbox-one-confirm-effects-label {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-confirm-effect {
+	font-size: 13px;
+	padding: 2px 0 2px 8px;
+}
+
+.inbox-one-confirm-reversibility {
+	margin-top: 8px;
+	font-size: 12px;
+}
+
+.inbox-one-confirm.irreversible .inbox-one-confirm-reversibility {
+	color: var(--vscode-editorWarning-foreground, #cca700);
+	font-weight: 600;
+}
+
+.inbox-one-confirm-gap {
+	margin-top: 6px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.inbox-one-confirm-buttons {
+	display: flex;
+	gap: 8px;
+	margin-top: 12px;
+	justify-content: flex-end;
+}
+
+.inbox-one-item.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
 }
 
 .inbox-one-diffy {
