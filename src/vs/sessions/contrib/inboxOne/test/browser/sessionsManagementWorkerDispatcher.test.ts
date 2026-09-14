@@ -35,6 +35,7 @@ class FakeSessions {
 	createResult: ISession | undefined;
 
 	isNewSessionTargetAvailable(): boolean { return this.targetAvailable; }
+	getSessionTypesForFolder(): [] { return []; }
 	async createAndSendNewChatRequest(folder: URI, options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown> }): Promise<ISession | undefined> {
 		this.created.push({ folder, query: options.query, title: options.title, metadata: createOptions?.metadata });
 		return this.createResult;
@@ -98,10 +99,26 @@ suite('Inbox One - SessionsManagementWorkerDispatcher', () => {
 		assert.strictEqual(result.reused, false);
 	});
 
-	test('defers when there is no workspace folder', async () => {
+	test('targets the repo as a github-remote (cloud) workspace when there is no local folder', async () => {
+		const sessions = new FakeSessions();
+		sessions.createResult = fakeSession('agent-host-session://cloud/worker-1');
+		const dispatcher = make(sessions, undefined);
+
+		const result = await dispatcher.dispatch(request());
+
+		// No local folder in the sessions window: dispatch a cloud worker against
+		// the task's repo (derived from the group key), so any enrolled repo can be
+		// worked without a local clone.
+		assert.strictEqual(sessions.created.length, 1);
+		assert.strictEqual(sessions.created[0].folder.scheme, 'github-remote-file');
+		assert.ok(sessions.created[0].folder.path.includes('acme/api'));
+		assert.strictEqual(result.sessionRef, 'agent-host-session://cloud/worker-1');
+	});
+
+	test('defers when there is neither a local folder nor a repo to target', async () => {
 		const sessions = new FakeSessions();
 		const dispatcher = make(sessions, undefined);
-		const result = await dispatcher.dispatch(request());
+		const result = await dispatcher.dispatch(request({ groupKey: 'no-key' as never, task: { ...task(), repo: undefined, groupKey: 'no-key' } as ILogicalTask }));
 		assert.strictEqual(sessions.created.length, 0);
 		assert.ok(result.sessionRef.startsWith('inboxone-pending://'));
 	});

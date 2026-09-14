@@ -8,6 +8,7 @@ import { generateUuid } from '../../../../base/common/uuid.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
+import { GITHUB_REMOTE_FILE_SCHEME } from '../../../services/sessions/common/session.js';
 import { WorkerRole } from '../common/eventTaxonomy.js';
 import { GroupKey } from '../common/inboxOneTypes.js';
 import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from '../common/workerDispatcher.js';
@@ -63,9 +64,14 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 			return { sessionRef: request.reuseSessionRef, reused: true };
 		}
 
-		const folder = this.resolveFolder();
-		if (!folder || !this.sessions.isNewSessionTargetAvailable(folder)) {
-			return this.deferred(request, 'no session target available (no connected agent host)');
+		const folder = this.resolveFolder(request);
+		if (!folder) {
+			return this.deferred(request, 'no workspace or repo to target');
+		}
+		if (!this.sessions.isNewSessionTargetAvailable(folder)) {
+			const types = this.sessions.getSessionTypesForFolder(folder);
+			this.logService.info(`[inboxOne] no session target for ${folder.toString()}: ${types.length} type(s) [${types.map(t => `${t.providerId}/${t.sessionType.id}`).join(', ')}]`);
+			return this.deferred(request, 'no session target available for the repo');
 		}
 
 		try {
@@ -128,7 +134,28 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 		}
 	}
 
-	private resolveFolder(): URI | undefined {
-		return this.workspaceContext.getWorkspace().folders[0]?.uri;
+	/**
+	 * Resolve the workspace the worker session runs against. Prefer a local
+	 * workspace folder if the sessions window has one; otherwise target the task's
+	 * repo as a GitHub-remote (cloud) workspace -- generalizable to any enrolled
+	 * repo with no local clone required, and the model the ambient cloud worker
+	 * uses. Returns undefined only when there is neither a folder nor a repo.
+	 */
+	private resolveFolder(request: IWorkerDispatchRequest): URI | undefined {
+		const local = this.workspaceContext.getWorkspace().folders[0]?.uri;
+		if (local) {
+			return local;
+		}
+		const repo = request.task.repo ?? repoFromGroupKey(request.groupKey);
+		if (repo && /^[^/\s]+\/[^/\s]+$/.test(repo)) {
+			return URI.from({ scheme: GITHUB_REMOTE_FILE_SCHEME, authority: 'github', path: `/${repo}/HEAD` });
+		}
+		return undefined;
 	}
+}
+
+/** Extracts `{owner}/{repo}` from a `owner/repo:kind:id` group key. */
+function repoFromGroupKey(groupKey: GroupKey): string | undefined {
+	const colon = groupKey.indexOf(':');
+	return colon > 0 ? groupKey.slice(0, colon) : undefined;
 }

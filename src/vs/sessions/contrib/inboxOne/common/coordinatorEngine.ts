@@ -74,6 +74,11 @@ export class CoordinatorEngine {
 	private async handleWorldEvent(event: IIngressEvent): Promise<void> {
 		const groupKey = deriveGroupKey(event);
 		const decision = evaluateGate(event, groupKey, this.gateContext(event));
+		if (decision.dispatch) {
+			this.logService.info(`[inboxOne] world event ${event.type}/${event.action ?? '-'} ${groupKey ?? '(no key)'}: DISPATCH role=${decision.role}`);
+		} else {
+			this.logService.info(`[inboxOne] world event ${event.type}/${event.action ?? '-'} ${groupKey ?? '(no key)'}: no-dispatch disposition=${decision.disposition} reason=${decision.reason}`);
+		}
 
 		if (!decision.dispatch) {
 			if (decision.disposition === 'drop') {
