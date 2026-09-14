@@ -124,7 +124,7 @@ export class WebhookIngressService extends Disposable {
 					dropDir: dropDir.fsPath,
 					updatedAt: Date.now(),
 				};
-				await fileService.writeFile(configUri, VSBuffer.fromString(JSON.stringify(config, null, 2)));
+				await fileService.writeFile(configUri, VSBuffer.fromString(JSON.stringify(config, null, 2)), { atomic: { postfix: '.tmp' } });
 			} catch (err) {
 				logService.trace(`[inboxOne] companion config write skipped: ${err instanceof Error ? err.message : String(err)}`);
 			}

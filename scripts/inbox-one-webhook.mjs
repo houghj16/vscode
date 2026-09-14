@@ -215,35 +215,49 @@ function reconcileForwarders(config) {
 }
 
 function readConfig() {
-	const cfg = { repos: [], events };
 	if (args.repos) {
-		cfg.repos = args.repos.split(',').map(r => r.trim()).filter(Boolean);
-		return cfg;
+		return { repos: args.repos.split(',').map(r => r.trim()).filter(Boolean), events };
+	}
+	// Returns null when the config cannot be read (missing yet, or a partial write
+	// observed mid-rename): callers keep the current forwarders rather than tearing
+	// them down on a transient read.
+	let raw;
+	try {
+		raw = fs.readFileSync(configPath, 'utf8');
+	} catch {
+		return null;
 	}
 	try {
-		const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-		if (Array.isArray(parsed.repos)) {
-			cfg.repos = parsed.repos;
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed.repos)) {
+			return null;
 		}
+		const cfg = { repos: parsed.repos, events };
 		if (Array.isArray(parsed.events) && parsed.events.length) {
 			cfg.events = parsed.events.join(',');
 		}
+		return cfg;
 	} catch {
-		/* config not written yet */
+		return null;
 	}
-	return cfg;
 }
 
 server.listen(port, '127.0.0.1', () => {
 	console.log(`[inbox-one-webhook] receiver on http://127.0.0.1:${server.address().port}/inbox-one/webhook`);
 	console.log(`[inbox-one-webhook] drop dir: ${dropDir}`);
-	reconcileForwarders(readConfig());
+	const initial = readConfig();
+	if (initial) {
+		reconcileForwarders(initial);
+	}
 	// React to enrollment changes the app writes into config.json (no polling of GitHub).
 	if (!args.repos) {
 		try {
 			fs.watch(path.dirname(configPath), (_e, file) => {
-				if (file === 'config.json') {
-					reconcileForwarders(readConfig());
+				if (file === 'config.json' || (file && file.startsWith('config.json'))) {
+					const cfg = readConfig();
+					if (cfg) {
+						reconcileForwarders(cfg);
+					}
 				}
 			});
 		} catch { /* ignore */ }
