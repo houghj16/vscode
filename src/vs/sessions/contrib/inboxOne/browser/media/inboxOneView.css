@@ -250,15 +250,87 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
+	width: 100%;
 	padding: 10px 16px 4px 16px;
 	font-size: 11px;
 	font-weight: 700;
 	letter-spacing: 0.08em;
 	color: var(--vscode-descriptionForeground);
+	background: none;
+	border: none;
+	text-align: left;
+	cursor: pointer;
+}
+
+.inbox-one-section-header:hover {
+	color: var(--vscode-foreground);
+}
+
+.inbox-one-section-caret {
+	display: inline-flex;
+	width: 12px;
+	justify-content: center;
+	opacity: 0.8;
+	font-weight: 400;
 }
 
 .inbox-one-section-count {
 	opacity: 0.7;
+}
+
+/* Cooking: three-stage progress (wireframes 6). */
+.inbox-one-cooking {
+	margin: 6px 0 14px 0;
+}
+
+.inbox-one-cooking-stages {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+.inbox-one-cooking-stage {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+.inbox-one-cooking-stage.done { color: var(--vscode-foreground); }
+.inbox-one-cooking-stage.active {
+	color: var(--vscode-foreground);
+	font-weight: 600;
+}
+.inbox-one-cooking-stage.active .inbox-one-cooking-dot {
+	color: var(--vscode-charts-blue, var(--vscode-progressBar-background));
+	animation: inbox-one-pulse 1.4s ease-in-out infinite;
+}
+.inbox-one-cooking-stage.done .inbox-one-cooking-dot { color: var(--vscode-charts-green, var(--vscode-foreground)); }
+.inbox-one-cooking-dot { font-size: 10px; }
+
+.inbox-one-cooking-rail {
+	flex: 1 1 18px;
+	min-width: 14px;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+}
+.inbox-one-cooking-rail.filled {
+	background: var(--vscode-charts-green, var(--vscode-progressBar-background));
+}
+
+.inbox-one-cooking-meta {
+	margin-top: 6px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+@keyframes inbox-one-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.35; }
 }
 
 .inbox-one-item {

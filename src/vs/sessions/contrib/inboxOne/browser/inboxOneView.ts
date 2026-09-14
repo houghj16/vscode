@@ -54,6 +54,8 @@ export class InboxOneView extends AbstractCustomView {
 	private listEl: HTMLElement | undefined;
 	private detailEl: HTMLElement | undefined;
 	private confirmPanel: HTMLElement | undefined;
+	/** Sections the user has collapsed (design/wireframes 6: the caret collapses a section). */
+	private readonly collapsedSections = new Set<string>();
 
 	constructor(
 		@IInboxOneStore private readonly store: IInboxOneStore,
@@ -204,9 +206,23 @@ export class InboxOneView extends AbstractCustomView {
 			if (items.length === 0) {
 				continue;
 			}
-			const header = list.appendChild($('.inbox-one-section-header'));
+			const collapsed = this.collapsedSections.has(section.key);
+			const header = list.appendChild($('button.inbox-one-section-header'));
+			header.classList.toggle('collapsed', collapsed);
+			header.appendChild($('span.inbox-one-section-caret', undefined, collapsed ? '\u203a' : '\u2304'));
 			header.appendChild($('.inbox-one-section-label', undefined, section.label));
 			header.appendChild($('.inbox-one-section-count', undefined, String(items.length)));
+			this._register(addClick(header, () => {
+				if (this.collapsedSections.has(section.key)) {
+					this.collapsedSections.delete(section.key);
+				} else {
+					this.collapsedSections.add(section.key);
+				}
+				this.renderList(this.store.tasks.get(), this.selectedTaskId.get());
+			}));
+			if (collapsed) {
+				continue;
+			}
 			for (const task of items) {
 				list.appendChild(this.renderListItem(task, section.key, task.id === selectedId));
 			}
@@ -280,10 +296,52 @@ export class InboxOneView extends AbstractCustomView {
 			const archive = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.archiveBtn', 'Archive')));
 			this._register(addClick(archive, () => this.dismiss(task)));
 		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
+			detail.appendChild(this.renderCookingStages(task));
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.cookingNote', 'Diffy is working on this. Evidence will land here when ready.')));
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
+			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
+			this._register(addClick(open, () => this.openWorkerSession(task)));
 			const cancel = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancelWork', 'Cancel work')));
 			this._register(addClick(cancel, () => this.cancelWork(task)));
+		}
+	}
+
+	/** The three cooking stages (wireframes 6): Triggered -> Doing work -> Assembling evidence. */
+	private renderCookingStages(task: ILogicalTask): HTMLElement {
+		const wrap = $('.inbox-one-cooking');
+		const active = task.state === LogicalTaskState.Confirming ? 2 : 1;
+		const labels = [
+			localize('inboxOne.stageTriggered', 'Triggered'),
+			localize('inboxOne.stageDoing', 'Doing work'),
+			localize('inboxOne.stageAssembling', 'Assembling evidence'),
+		];
+		const stages = wrap.appendChild($('.inbox-one-cooking-stages'));
+		labels.forEach((label, i) => {
+			if (i > 0) {
+				stages.appendChild($(`.inbox-one-cooking-rail${i <= active ? '.filled' : ''}`));
+			}
+			const state = i < active ? 'done' : i === active ? 'active' : 'pending';
+			const stage = stages.appendChild($(`.inbox-one-cooking-stage.${state}`));
+			stage.appendChild($('span.inbox-one-cooking-dot', undefined, state === 'pending' ? '\u25cb' : '\u25cf'));
+			stage.appendChild($('span', undefined, label));
+		});
+		const attempt = task.attempts[task.currentAttempt];
+		const elapsed = formatElapsed(Date.now() - (attempt?.startedAt ?? task.createdAt));
+		wrap.appendChild($('.inbox-one-cooking-meta', undefined, `\u25b2 ${task.type} \u00b7 ${elapsed}`));
+		return wrap;
+	}
+
+	/** Opens the live worker session backing the current attempt (wireframes 6: [ Open ]). */
+	private openWorkerSession(task: ILogicalTask): void {
+		const ref = task.attempts[task.currentAttempt]?.sessionRef;
+		if (!ref || ref.startsWith('inboxone-pending:') || ref.startsWith('inboxone-stub:')) {
+			this.notificationService.info(localize('inboxOne.noWorkerYet', 'The worker session is still starting - no host connected yet.'));
+			return;
+		}
+		try {
+			void this.openerService.open(URI.parse(ref));
+		} catch {
+			this.notificationService.info(localize('inboxOne.noWorkerYet', 'The worker session is still starting - no host connected yet.'));
 		}
 	}
 
@@ -403,6 +461,14 @@ function addClick(el: HTMLElement, handler: () => void): { dispose(): void } {
 	const listener = (e: Event) => { e.preventDefault(); e.stopPropagation(); handler(); };
 	el.addEventListener('click', listener);
 	return { dispose: () => el.removeEventListener('click', listener) };
+}
+
+/** Human-legible elapsed time (no telemetry chrome): "just now", "6m", "2h". */
+function formatElapsed(ms: number): string {
+	const mins = Math.floor(ms / 60000);
+	if (mins < 1) { return localize('inboxOne.justNow', 'just now'); }
+	if (mins < 60) { return localize('inboxOne.minutes', '{0}m', mins); }
+	return localize('inboxOne.hours', '{0}h', Math.floor(mins / 60));
 }
 
 function addKeydown(el: HTMLElement, key: string, handler: () => void): { dispose(): void } {
