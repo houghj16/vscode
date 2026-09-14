@@ -343,6 +343,24 @@
 	flex-direction: column;
 }
 
+.inbox-one-scope {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 16px 2px 16px;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.inbox-one-scope-select {
+	background: var(--vscode-dropdown-background);
+	color: var(--vscode-dropdown-foreground);
+	border: 1px solid var(--vscode-dropdown-border, transparent);
+	border-radius: 4px;
+	padding: 1px 4px;
+	font-size: 11px;
+}
+
 .inbox-one-section-header {
 	display: flex;
 	align-items: center;
@@ -379,7 +397,6 @@
 .inbox-one-cooking {
 	margin: 6px 0 14px 0;
 }
-
 .inbox-one-cooking.compact {
 	margin: 4px 0 0 0;
 	font-size: 11px;

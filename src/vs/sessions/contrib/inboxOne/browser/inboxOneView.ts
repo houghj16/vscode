@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/inboxOneView.css';
-import { $, clearNode } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, clearNode } from '../../../../base/browser/dom.js';
 import { autorun, constObservable, IObservable, ISettableObservable, observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
@@ -60,6 +60,8 @@ export class InboxOneView extends AbstractCustomView {
 	private confirmPanel: HTMLElement | undefined;
 	/** Sections the user has collapsed (design/wireframes 6: the caret collapses a section). */
 	private readonly collapsedSections = new Set<string>();
+	/** The repo scope filter (wireframes 2 "my" selector); undefined = all repos. */
+	private readonly scopeRepo: ISettableObservable<string | undefined> = observableValue('inboxOneScope', undefined);
 
 	constructor(
 		@IInboxOneStore private readonly store: IInboxOneStore,
@@ -105,6 +107,7 @@ export class InboxOneView extends AbstractCustomView {
 		this._register(autorun(reader => {
 			diffy.classList.toggle('selected', this.selectedTaskId.read(reader) === DIFFY_SELECTION);
 		}));
+		const scopeEl = left.appendChild($('.inbox-one-scope'));
 		this.listEl = left.appendChild($('.inbox-one-list'));
 
 		this.detailEl = panes.appendChild($('.inbox-one-detail'));
@@ -112,13 +115,42 @@ export class InboxOneView extends AbstractCustomView {
 		this._register(autorun(reader => {
 			const tasks = this.store.tasks.read(reader);
 			const selected = this.selectedTaskId.read(reader);
+			const scope = this.scopeRepo.read(reader);
 			this.diffyReference.read(reader);
-			this.renderList(tasks, selected);
+			this.renderScope(scopeEl, tasks, scope);
+			const scoped = scope ? tasks.filter(t => t.repo === scope) : tasks;
+			this.renderList(scoped, selected);
 			if (selected === DIFFY_SELECTION) {
 				this.renderDiffyDetail(tasks);
 			} else {
 				this.renderDetail(tasks.find(t => t.id === selected));
 			}
+		}));
+	}
+
+	/** The "my" repo scope selector (wireframes 2): scope the inbox to one enrolled repo or all. */
+	private renderScope(container: HTMLElement, tasks: readonly ILogicalTask[], scope: string | undefined): void {
+		clearNode(container);
+		const repos = Array.from(new Set(tasks.map(t => t.repo).filter((r): r is string => !!r))).sort();
+		if (repos.length < 2) {
+			container.style.display = 'none';
+			return;
+		}
+		container.style.display = '';
+		container.appendChild($('span.inbox-one-scope-label', undefined, localize('inboxOne.scopeLabel', 'Showing')));
+		const select = container.appendChild($('select.inbox-one-scope-select')) as HTMLSelectElement;
+		const allOpt = select.appendChild($('option')) as HTMLOptionElement;
+		allOpt.value = '';
+		allOpt.textContent = localize('inboxOne.scopeAll', 'all repos');
+		allOpt.selected = !scope;
+		for (const repo of repos) {
+			const opt = select.appendChild($('option')) as HTMLOptionElement;
+			opt.value = repo;
+			opt.textContent = repo;
+			opt.selected = scope === repo;
+		}
+		this._register(addDisposableListener(select, 'change', () => {
+			this.scopeRepo.set(select.value || undefined, undefined);
 		}));
 	}
 
