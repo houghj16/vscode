@@ -119,12 +119,16 @@ function reconcileForwarders(config) {
 		}
 	}
 	const url = `http://127.0.0.1:${server.address().port}/inbox-one/webhook`;
+	// `gh webhook forward` subscribes to all events ('*'); the coordinator's
+	// dispatch gate filters by trigger family, and '*' avoids a 422 that some
+	// individual (deprecated/permission-gated) event names trigger on create.
+	const ghEvents = '*';
 	for (const repo of wanted) {
 		if (forwarders.has(repo)) {
 			continue;
 		}
-		console.log(`[inbox-one-webhook] forwarding ${repo} (events=${activeEvents}) -> ${url}`);
-		const child = spawn('gh', ['webhook', 'forward', `--repo=${repo}`, `--events=${activeEvents}`, `--url=${url}`], {
+		console.log(`[inbox-one-webhook] forwarding ${repo} (events=${ghEvents}, coordinator filters to ${activeEvents}) -> ${url}`);
+		const child = spawn('gh', ['webhook', 'forward', `--repo=${repo}`, `--events=${ghEvents}`, `--url=${url}`], {
 			stdio: ['ignore', 'inherit', 'inherit'],
 			env: process.env,
 		});

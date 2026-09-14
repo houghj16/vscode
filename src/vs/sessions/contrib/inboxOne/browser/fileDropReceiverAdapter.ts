@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IntervalTimer } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
-import { IFileService } from '../../../../platform/files/common/files.js';
+import { FileOperationError, FileOperationResult, IFileService } from '../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWebhookHeaders } from '../common/githubWebhook.js';
 import { IReceiverAdapter, IWebhookDelivery } from '../common/webhookIngress.js';
@@ -25,10 +26,12 @@ interface IDroppedDelivery {
  * is sandboxed and cannot bind a socket, so the physical GitHub webhook receiver
  * runs in a companion node process (see `node/webhookReceiverServer.ts`); that
  * process HMAC-verifies each delivery and drops it here as one JSON file. This
- * adapter watches the directory (push-based inotify, NOT polling -- the spec
- * forbids periodic polling) and re-emits each delivery to the already-tested
+ * adapter drains the directory -- via an OS file watch (instant) plus a short
+ * local-directory poll as a robust fallback (OS watches on tmp/arbitrary paths
+ * are not always reliable) -- and re-emits each delivery to the already-tested
  * {@link WebhookIngress} orchestration, so ingest is uniform whatever the physical
- * transport.
+ * transport. The poll is a local-filesystem detail; it is NOT GitHub polling (the
+ * spec forbids only periodic polling of GitHub).
  *
  * Signature verification already happened in the companion process (it holds the
  * shared secret), and the drop directory lives under the user's own data home --
@@ -72,7 +75,10 @@ export class FileDropReceiverAdapter extends Disposable implements IReceiverAdap
 	async start(): Promise<void> {
 		try {
 			await this.fileService.createFolder(this.dropDir);
-			// Watch push-based; drain anything already queued from before we started.
+			// Two delivery paths, both feeding the idempotent drain: an OS file watch
+			// (instant when it fires) and a short local-directory poll (a robust
+			// fallback -- OS watches on arbitrary/tmp paths are not always reliable).
+			// This poll is a local-filesystem detail, NOT GitHub polling.
 			this._register(this.fileService.watch(this.dropDir));
 			this._register(this.fileService.onDidFilesChange(e => {
 				for (const added of e.rawAdded) {
@@ -81,6 +87,8 @@ export class FileDropReceiverAdapter extends Disposable implements IReceiverAdap
 					}
 				}
 			}));
+			const poll = this._register(new IntervalTimer());
+			poll.cancelAndSet(() => void this.drainExisting(), 1000);
 			await this.drainExisting();
 			this.logService.info(`[inboxOne] webhook drop receiver watching ${this.dropDir.fsPath}`);
 		} catch (err) {
@@ -111,6 +119,9 @@ export class FileDropReceiverAdapter extends Disposable implements IReceiverAdap
 		}
 		this.processing.add(key);
 		try {
+			if (!(await this.fileService.exists(file))) {
+				return; // Already consumed by another drain path (watch/poll or window).
+			}
 			const content = await this.fileService.readFile(file);
 			const parsed = JSON.parse(content.value.toString()) as IDroppedDelivery;
 			if (parsed && parsed.headers && typeof parsed.rawBody === 'string') {
@@ -118,6 +129,9 @@ export class FileDropReceiverAdapter extends Disposable implements IReceiverAdap
 			}
 			await this.fileService.del(file);
 		} catch (err) {
+			if (err instanceof FileOperationError && err.fileOperationResult === FileOperationResult.FILE_NOT_FOUND) {
+				return; // Raced with another drain path; the delivery is already handled.
+			}
 			this.logService.warn(`[inboxOne] webhook drop parse/del failed for ${file.fsPath}: ${err instanceof Error ? err.message : String(err)}`);
 		} finally {
 			this.processing.delete(key);
