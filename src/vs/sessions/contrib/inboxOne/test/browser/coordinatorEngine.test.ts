@@ -7,15 +7,15 @@ import assert from 'assert';
 import { Emitter } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
-import { AdmissionResult } from '../../common/admissionControl.js';
+import { AdmissionResult, DEFAULT_BUDGET_CAPS, IBudgetCaps } from '../../common/admissionControl.js';
 import { CoordinatorEngine, IAdmissionManager } from '../../common/coordinatorEngine.js';
 import { IAutomationStorageCompareAndSwapResult, IAutomationStorageService } from '../../../automations/common/automationStorageService.js';
 import { TriggerFamily } from '../../common/eventTaxonomy.js';
 import { InboxOneStore } from '../../browser/inboxOneStore.js';
 import { AutonomyLevel, IInboxOneSettings, INotificationPreferences, IRepoEnrollment } from '../../common/inboxOneSettings.js';
-import { EventSource, IEventSubject, IIngressEvent, LogicalTaskState } from '../../common/inboxOneTypes.js';
-import { DEFAULT_BUDGET_CAPS, IBudgetCaps } from '../../common/admissionControl.js';
+import { EventSource, IEventSubject, IIngressEvent, LogicalTaskState, ActionType, InboxOneTier } from '../../common/inboxOneTypes.js';
 import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from '../../common/workerDispatcher.js';
+import { IWorkerOutput, IWorkerResultReader } from '../../common/workerResult.js';
 
 class InMemoryCasStorage implements IAutomationStorageService {
 	declare readonly _serviceBrand: undefined;
@@ -79,6 +79,30 @@ class FakeDispatcher implements IWorkerDispatcher {
 		return { sessionRef: `session://worker/${request.task.id}`, reused: false };
 	}
 	async relay(sessionRef: string, message: string): Promise<void> { this.relays.push({ sessionRef, message }); }
+}
+
+class FakeResultReader implements IWorkerResultReader {
+	output: IWorkerOutput | undefined;
+	reads: string[] = [];
+	async read(_task: unknown, sessionRef: string): Promise<IWorkerOutput | undefined> {
+		this.reads.push(sessionRef);
+		return this.output;
+	}
+}
+
+/** A valid raw worker result (as the emit-result contract produces). */
+function validOutput(): IWorkerOutput {
+	return {
+		result: {
+			decisionSentence: 'PR #842 is ready to approve',
+			claims: [{ text: '47/47 checks pass', receiptLink: 'https://run/1', rung: 1 }],
+			gapLine: 'behavior under production load not verified',
+			actionType: ActionType.ApprovePr,
+			payload: { repo: 'acme/api', prNumber: 842 },
+			label: 'Approve PR',
+		},
+		signals: { blocking: true, blocksPeople: 2, recipientAffinity: 0.8, evidenceConfidence: 0.9, urgency: 0.6 },
+	};
 }
 
 function prEvent(subject: Partial<IEventSubject> = {}): IIngressEvent {
@@ -166,6 +190,45 @@ suite('Inbox One - coordinator engine', () => {
 		const { store, engine } = build();
 		await engine.handleEvent({ deliveryId: 'se3', source: EventSource.Session, sessionId: 'ghost', type: 'failed', subject: { kind: 'session', id: 'ghost' }, receivedAt: 0 });
 		assert.strictEqual(store.tasks.get().length, 0);
+	});
+
+	test('a finished worker lands a host-ranked, evidence-backed decision (no hardcoding)', async () => {
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = validOutput();
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), new FakeDispatcher(), new NullLogService(), undefined, reader);
+
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		await engine.handleEvent({ deliveryId: 'sf1', source: EventSource.Session, sessionId, type: 'task_finished', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+
+		const landed = store.getTask(task.id)!;
+		assert.strictEqual(landed.state, LogicalTaskState.Decision);
+		// Evidence came from the worker's emitted result, validated by the host.
+		assert.strictEqual(landed.evidence!.decisionSentence, 'PR #842 is ready to approve');
+		assert.strictEqual(landed.evidence!.primaryAction!.actionType, ActionType.ApprovePr);
+		// Tier + reason were computed by the host ranker from real signals, not authored.
+		assert.strictEqual(landed.tier, InboxOneTier.Urgent);
+		assert.ok(landed.rankReason && landed.rankReason.length > 0);
+		assert.strictEqual(reader.reads.length, 1, 'the worker result was read once');
+	});
+
+	test('an invalid worker result fails the attempt instead of fabricating a decision', async () => {
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = { result: { decisionSentence: '', claims: [], gapLine: '' }, signals: {} }; // missing mandatory evidence
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), new FakeDispatcher(), new NullLogService(), undefined, reader);
+
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		await engine.handleEvent({ deliveryId: 'sf2', source: EventSource.Session, sessionId, type: 'task_finished', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+
+		const landed = store.getTask(task.id)!;
+		// A failed attempt surfaces as a Decision + Retry, never a fabricated success.
+		assert.strictEqual(landed.state, LogicalTaskState.Decision);
+		assert.strictEqual(landed.evidence, undefined, 'no evidence was fabricated');
 	});
 
 	test('a disabled trigger family drops', async () => {

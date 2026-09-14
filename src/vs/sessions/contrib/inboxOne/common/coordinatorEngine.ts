@@ -6,13 +6,16 @@
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { AdmissionResult, isAdmitted } from './admissionControl.js';
 import { evaluateGate, IGateContext } from './dispatchGate.js';
+import { validateWorkerResult } from './emitResult.js';
 import { triggerFamilyFor, WorkerRole } from './eventTaxonomy.js';
 import { deriveGroupKey } from './groupKey.js';
-import { IInboxOneStore } from './inboxOneStore.js';
+import { currentAttempt, IInboxOneStore } from './inboxOneStore.js';
 import { AutonomyLevel, IInboxOneSettings } from './inboxOneSettings.js';
 import { AttemptTrigger, EventSource, GroupKey, IIngressEvent, ILogicalTask, LogicalTaskState } from './inboxOneTypes.js';
 import { TaskTrigger } from './inboxOneStateMachine.js';
+import { rank } from './ranking.js';
 import { IWorkerDispatcher } from './workerDispatcher.js';
+import { IWorkerResultReader } from './workerResult.js';
 
 /** Durable admission manager: reserves/releases slots and enforces caps (design 7.4). */
 export interface IAdmissionManager {
@@ -56,6 +59,7 @@ export class CoordinatorEngine {
 		private readonly dispatcher: IWorkerDispatcher,
 		private readonly logService: ILogService,
 		private readonly briefFactory: BriefFactory = DEFAULT_BRIEF,
+		private readonly resultReader?: IWorkerResultReader,
 	) { }
 
 	/** Processes one normalized ambient event. */
@@ -113,9 +117,7 @@ export class CoordinatorEngine {
 		}
 		switch (event.type) {
 			case 'task_finished':
-				// Evidence assembly + landing is driven by the evidence pipeline; the
-				// engine records the lifecycle signal so the task can transition.
-				this.logService.trace(`[inboxOne] worker ${event.sessionId} finished for task ${task.id}`);
+				await this.landWorkerResult(task);
 				break;
 			case 'needs_input':
 				await this.store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Worker needs input.' });
@@ -129,6 +131,56 @@ export class CoordinatorEngine {
 				// Non-dispatching; updates the Cooking view only (G15).
 				break;
 		}
+	}
+
+	/**
+	 * Turns a finished worker into a decision-ready result (technical spec 2.3):
+	 * read the worker's emitted result, HOST-validate it into an evidence pack,
+	 * HOST-compute the tier + plain-language rank reason from real signals, and
+	 * land it as a Decision. A missing or invalid result surfaces as a failed
+	 * attempt (a Retry decision), never a fabricated success. Nothing here is
+	 * authored by the model except the raw candidate the host validates.
+	 */
+	private async landWorkerResult(task: ILogicalTask): Promise<void> {
+		if (!this.resultReader) {
+			// No reader wired (e.g. pure-logic tests / no host); the lifecycle signal
+			// is recorded but evidence lands via another path.
+			this.logService.trace(`[inboxOne] worker finished for task ${task.id}; no result reader wired`);
+			return;
+		}
+		const sessionRef = currentAttempt(task)?.sessionRef;
+		if (!sessionRef) {
+			await this.store.transition(task.id, TaskTrigger.AttemptFailed);
+			return;
+		}
+
+		let output;
+		try {
+			output = await this.resultReader.read(task, sessionRef);
+		} catch (err) {
+			this.logService.error(`[inboxOne] reading worker result for task ${task.id} failed`, err);
+			output = undefined;
+		}
+		if (!output) {
+			await this.store.transition(task.id, TaskTrigger.AttemptFailed);
+			return;
+		}
+
+		const validated = validateWorkerResult(output.result);
+		if (!validated.ok) {
+			this.logService.warn(`[inboxOne] worker result for task ${task.id} rejected: ${validated.problems.join('; ')}`);
+			await this.store.transition(task.id, TaskTrigger.AttemptFailed);
+			return;
+		}
+
+		await this.store.setEvidence(task.id, validated.evidence);
+		const ranked = rank(output.signals);
+		await this.store.transition(task.id, TaskTrigger.EvidenceAssembled, {
+			tier: ranked.tier,
+			rank: ranked.rank,
+			rankReason: ranked.reason,
+		});
+		this.logService.info(`[inboxOne] task ${task.id} landed as ${ranked.tier}: ${ranked.reason}`);
 	}
 
 	private async dispatchFor(task: ILogicalTask, role: WorkerRole, groupKey: GroupKey): Promise<void> {
