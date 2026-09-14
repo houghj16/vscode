@@ -17,7 +17,7 @@ import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
-import { ActionType, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { ActionType, GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
 
 interface ITierSpec {
 	readonly key: string;
@@ -290,6 +290,10 @@ export class InboxOneView extends AbstractCustomView {
 			detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo}${pack?.freshness.headSha ? ' - head ' + pack.freshness.headSha : ''}`));
 		}
 
+		if (task.state === LogicalTaskState.Decision && task.rankReason) {
+			this.renderWhyRank(detail, task);
+		}
+
 		if (pack?.primaryAction) {
 			detail.appendChild($('.inbox-one-detail-accepting', undefined, this.acceptingLine(pack.primaryAction.actionType)));
 		}
@@ -329,6 +333,42 @@ export class InboxOneView extends AbstractCustomView {
 			const cancel = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancelWork', 'Cancel work')));
 			this._register(addClick(cancel, () => this.cancelWork(task)));
 		}
+	}
+
+	/**
+	 * The "Why this rank?" affordance (design 3.4 / 7.1, wireframes 13): a plain-
+	 * language explanation of the tier + rank, plus a "Not my area" learning signal
+	 * distinct from Dismiss. No score chrome.
+	 */
+	private renderWhyRank(detail: HTMLElement, task: ILogicalTask): void {
+		const row = detail.appendChild($('.inbox-one-whyrank-row'));
+		const toggle = row.appendChild($('button.inbox-one-whyrank-link', undefined, localize('inboxOne.whyRank', 'Why this rank?')));
+		const pop = detail.appendChild($('.inbox-one-whyrank-pop'));
+		pop.style.display = 'none';
+		pop.appendChild($('.inbox-one-whyrank-tier', undefined, this.tierRationale(task.tier)));
+		pop.appendChild($('.inbox-one-whyrank-reason', undefined, task.rankReason ?? ''));
+		const actions = pop.appendChild($('.inbox-one-whyrank-actions'));
+		const notMine = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.notMyArea', 'Not my area')));
+		this._register(addClick(notMine, () => this.notMyArea(task)));
+		this._register(addClick(toggle, () => {
+			pop.style.display = pop.style.display === 'none' ? 'block' : 'none';
+		}));
+	}
+
+	/** Plain-language rationale for why the task landed in its tier (design 7.1). */
+	private tierRationale(tier: InboxOneTier | undefined): string {
+		switch (tier) {
+			case InboxOneTier.Critical: return localize('inboxOne.tierCriticalWhy', 'Critical: an active incident, reachable security exposure, or a rapidly-expiring high-impact action.');
+			case InboxOneTier.Urgent: return localize('inboxOne.tierUrgentWhy', 'Urgent: a blocking or time-boxed decision that materially affects delivery.');
+			default: return localize('inboxOne.tierFyiWhy', 'FYI: a completed analysis or a safe action, for your awareness.');
+		}
+	}
+
+	/** Records the "Not my area" signal (design 3.4): a rank-lowering DRI hint, then archives quietly. */
+	private async notMyArea(task: ILogicalTask): Promise<void> {
+		await this.store.recordGesture({ taskId: task.id, kind: GestureKind.NotMyArea, timestamp: Date.now() });
+		await this.store.transition(task.id, TaskTrigger.Dismiss, { archiveReason: 'not my area' });
+		this.notificationService.info(localize('inboxOne.notMyAreaAck', "Noted - I'll surface less of this area for you."));
 	}
 
 	/**

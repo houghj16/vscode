@@ -65,6 +65,7 @@ export function routeGesture(gesture: GestureKind): LearningTarget {
 		case GestureKind.Dismiss:
 		case GestureKind.Rerank:
 		case GestureKind.Snooze:
+		case GestureKind.NotMyArea:
 			return LearningTarget.CoordinatorSkill;
 	}
 }

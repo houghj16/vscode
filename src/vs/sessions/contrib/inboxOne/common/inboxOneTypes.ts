@@ -71,6 +71,8 @@ export const enum GestureKind {
 	Dismiss = 'dismiss',
 	Snooze = 'snooze',
 	Rerank = 'rerank',
+	/** "Not my area" from the Why-this-rank popover (design 3.4): a rank-lowering DRI/authority signal, distinct from dismiss. */
+	NotMyArea = 'not_my_area',
 }
 
 /**

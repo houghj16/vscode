@@ -11,25 +11,43 @@
 	padding: 8px 0;
 }
 
+/*
+ * This view manages its own selection highlighting, so suppress the custom-view
+ * focus-fallback outline that otherwise rings the whole component when a click
+ * lands on a non-focusable row (matches the Automations view). The container the
+ * host passes to render() is .custom-view-content, which also carries this class;
+ * both classes are used together to outrank the shared .custom-view-content rule.
+ */
+.custom-view-content.inbox-one-view:focus,
+.custom-view-content.inbox-one-view:focus-visible {
+	outline: none;
+}
+
 .inbox-one-panes {
 	display: flex;
 	flex: 1;
 	min-height: 0;
+	min-width: 0;
 	gap: 8px;
+	overflow: hidden;
 }
 
 .inbox-one-left {
 	flex: 0 0 42%;
 	max-width: 480px;
+	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	overflow: auto;
+	overflow-y: auto;
+	overflow-x: hidden;
 	border-right: 1px solid var(--vscode-panel-border, transparent);
 }
 
 .inbox-one-detail {
 	flex: 1;
-	overflow: auto;
+	min-width: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
 	padding: 12px 20px;
 }
 
@@ -97,6 +115,47 @@
 	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
 	font-style: italic;
+}
+
+.inbox-one-whyrank-row {
+	margin: 2px 0 8px 0;
+}
+
+.inbox-one-whyrank-link {
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.inbox-one-whyrank-link:hover {
+	text-decoration: underline;
+}
+
+.inbox-one-whyrank-pop {
+	margin: 4px 0 10px 0;
+	padding: 10px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--vscode-panel-border, transparent);
+	background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+}
+
+.inbox-one-whyrank-tier {
+	font-size: 12px;
+	margin-bottom: 4px;
+}
+
+.inbox-one-whyrank-reason {
+	font-size: 13px;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+
+.inbox-one-whyrank-actions {
+	display: flex;
+	gap: 6px;
 }
 
 .inbox-one-detail-actions {

@@ -60,6 +60,9 @@ export function applyGestureToAuthority(
 			case GestureKind.Steer:
 				positive += 1;
 				break;
+			case GestureKind.NotMyArea:
+				negative += 2; // explicit strong non-ownership (Why-this-rank popover)
+				break;
 			case GestureKind.Dismiss:
 				negative += 1;
 				break;
