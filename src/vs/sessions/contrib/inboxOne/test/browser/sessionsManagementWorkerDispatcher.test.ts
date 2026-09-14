@@ -85,8 +85,8 @@ suite('Inbox One - SessionsManagementWorkerDispatcher', () => {
 
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	function make(sessions: FakeSessions, folder: URI | undefined, fileStore: FakeFileStore = new FakeFileStore()) {
-		return new SessionsManagementWorkerDispatcher(sessions.asService(), fakeWorkspace(folder), fileStore.asService(), disposables.add(new NullLogService()));
+	function make(sessions: FakeSessions, folder: URI | undefined, fileStore: FakeFileStore = new FakeFileStore(), allowCloudFallback: boolean = true) {
+		return new SessionsManagementWorkerDispatcher(allowCloudFallback, sessions.asService(), fakeWorkspace(folder), fileStore.asService(), disposables.add(new NullLogService()));
 	}
 
 	test('creates a real worker session and returns its resource ref', async () => {
@@ -155,6 +155,18 @@ suite('Inbox One - SessionsManagementWorkerDispatcher', () => {
 		assert.strictEqual(sessions.created[0].folder.scheme, 'github-remote-file');
 		assert.ok(sessions.created[0].folder.path.includes('acme/api'));
 		assert.strictEqual(result.sessionRef, 'agent-host-session://cloud/worker-1');
+	});
+
+	test('defers (for the simulator) instead of cloud when cloud fallback is disabled (dev)', async () => {
+		const sessions = new FakeSessions();
+		sessions.createResult = fakeSession('agent-host-session://cloud/worker-1');
+		const dispatcher = make(sessions, undefined, new FakeFileStore(), /*allowCloudFallback*/ false);
+
+		const result = await dispatcher.dispatch(request());
+
+		assert.strictEqual(sessions.created.length, 0, 'no cloud session is attempted');
+		assert.ok(result.sessionRef.startsWith('inboxone-pending://'));
+		assert.strictEqual(result.deferred, true, 'signals deferral so the coordinator releases admission and the simulator takes over');
 	});
 
 	test('defers when there is neither a local folder nor a repo to target', async () => {

@@ -51,7 +51,12 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 	) {
 		super();
 		const admission = new LiveAdmissionManager(this.store, this.settings, storage);
-		const realDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher);
+		const isDevBuild = product.quality !== 'stable';
+		// In dev builds the real dispatcher does NOT fall back to the (flakier)
+		// cloud path when the window has no local folder -- it defers, and the
+		// in-window simulator below takes over, so the dev loop is fast and
+		// deterministic. Stable builds keep the real cloud fallback.
+		const realDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher, !isDevBuild);
 		// Reads a finished worker session's final message from the chat model, so
 		// `task_finished` produces real evidence with a connected host.
 		const workbenchSource = instantiationService.createInstance(WorkbenchTranscriptSource);
@@ -63,7 +68,7 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 		// -> host-validate -> host-rank -> land) is exercised headless with real,
 		// non-hardcoded evidence. Never wired in stable builds (see the gate), so
 		// simulated evidence can never reach production.
-		if (product.quality !== 'stable') {
+		if (isDevBuild) {
 			const runtime = this._register(new SimulatedWorkerRuntime(this.ingress, this.logService));
 			const simulated = new SimulatedWorkerDispatcher(runtime);
 			dispatcher = new FallbackWorkerDispatcher(realDispatcher, simulated, this.logService, isPendingRef);

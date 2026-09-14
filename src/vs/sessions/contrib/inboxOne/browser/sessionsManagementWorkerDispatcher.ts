@@ -58,6 +58,8 @@ function workerTitle(role: WorkerRole, groupKey: GroupKey): string {
 export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 
 	constructor(
+		/** Whether to target the task's repo as a cloud (github-remote) workspace when the window has no local folder. Off in dev builds so dispatch defers to the in-window simulator instead of the flakier cloud path. */
+		private readonly allowCloudFallback: boolean,
 		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
 		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
 		@IInboxOneFileStore private readonly fileStore: IInboxOneFileStore,
@@ -174,6 +176,9 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 		const local = this.workspaceContext.getWorkspace().folders[0]?.uri;
 		if (local) {
 			return local;
+		}
+		if (!this.allowCloudFallback) {
+			return undefined;
 		}
 		const repo = request.task.repo ?? repoFromGroupKey(request.groupKey);
 		if (repo && /^[^/\s]+\/[^/\s]+$/.test(repo)) {
