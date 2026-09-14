@@ -16,6 +16,7 @@ import { TaskTrigger } from './inboxOneStateMachine.js';
 import { rank } from './ranking.js';
 import { IWorkerDispatcher } from './workerDispatcher.js';
 import { IWorkerResultReader } from './workerResult.js';
+import { buildWorkerBrief } from './workerBrief.js';
 
 /** Durable admission manager: reserves/releases slots and enforces caps (design 7.4). */
 export interface IAdmissionManager {
@@ -30,14 +31,12 @@ export interface IAdmissionManager {
 /** Builds the self-contained worker brief for a role + task (technical spec 2.2 step 4). */
 export type BriefFactory = (role: WorkerRole, task: ILogicalTask) => string;
 
-const DEFAULT_BRIEF: BriefFactory = (role, task) => {
-	const subject = task.sourceEvent.subject;
-	return [
-		`Role: ${role}.`,
-		`Work item: ${task.repo ?? 'unknown repo'} ${subject.kind} ${subject.id} (${task.sourceEvent.type}${task.sourceEvent.action ? '.' + task.sourceEvent.action : ''}).`,
-		`Produce a decision-ready result for the human. As the final step, follow the emit-result contract and produce the structured action + label + evidence pack.`,
-	].join('\n');
-};
+/**
+ * The default brief factory produces the rich, self-contained task brief
+ * ({@link buildWorkerBrief}); the harness prepends the operating envelope and the
+ * mounted skills persona at dispatch (technical spec 2.2-2.3).
+ */
+const DEFAULT_BRIEF: BriefFactory = buildWorkerBrief;
 
 /**
  * The coordinator engine (design 4, technical spec 4): the deterministic spine

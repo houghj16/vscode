@@ -10,8 +10,10 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { GITHUB_REMOTE_FILE_SCHEME } from '../../../services/sessions/common/session.js';
 import { WorkerRole } from '../common/eventTaxonomy.js';
+import { IInboxOneFileStore } from '../common/inboxOneFileStore.js';
 import { GroupKey } from '../common/inboxOneTypes.js';
 import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from '../common/workerDispatcher.js';
+import { composeWorkerFirstMessage } from '../common/workerBrief.js';
 
 /** URI scheme for a deferred dispatch when no agent host/target is available yet. */
 const PENDING_SCHEME = 'inboxone-pending';
@@ -53,6 +55,7 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 	constructor(
 		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
 		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
+		@IInboxOneFileStore private readonly fileStore: IInboxOneFileStore,
 		@ILogService private readonly logService: ILogService,
 	) { }
 
@@ -74,10 +77,12 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 			return this.deferred(request, 'no session target available for the repo');
 		}
 
+		const firstMessage = await this.composeFirstMessage(request);
+
 		try {
 			const session = await this.sessions.createAndSendNewChatRequest(
 				folder,
-				{ query: request.brief, title: workerTitle(request.role, request.groupKey), background: true },
+				{ query: firstMessage, title: workerTitle(request.role, request.groupKey), background: true },
 				{
 					metadata: {
 						[INBOX_ONE_SESSION_META.role]: request.role,
@@ -103,6 +108,25 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 		if (!await this.relaySafely(sessionRef, message)) {
 			this.logService.warn(`[inboxOne] relay target ${sessionRef} not found`);
 		}
+	}
+
+	/**
+	 * Composes the worker's first message: the fixed operating envelope, the
+	 * mounted skills persona for the role (role skills + learned patterns + the
+	 * emit-result contract, via `mountRoles`), and the task brief (technical spec
+	 * 2.2-2.3). The harness -- not the model -- attaches the skills. A file-store
+	 * failure degrades to an empty persona; the self-contained brief still stands.
+	 */
+	private async composeFirstMessage(request: IWorkerDispatchRequest): Promise<string> {
+		let personaText = '';
+		try {
+			const mounted = await this.fileStore.mountRoles([request.role]);
+			personaText = mounted.personaText;
+			this.logService.trace(`[inboxOne] mounted ${mounted.skillIds.length} skill(s) for ${request.role}: [${mounted.skillIds.join(', ')}]`);
+		} catch (err) {
+			this.logService.warn(`[inboxOne] mounting skills for ${request.role} failed; sending brief without persona: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		return composeWorkerFirstMessage(personaText, request.brief);
 	}
 
 	private deferred(request: IWorkerDispatchRequest, reason: string): IWorkerDispatchResult {

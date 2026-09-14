@@ -1,0 +1,177 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { WorkerRole } from './eventTaxonomy.js';
+import { ILogicalTask } from './inboxOneTypes.js';
+
+/**
+ * Coordinator -> worker handoff (technical spec 2.2 step 4, 2.3).
+ *
+ * A dispatched worker's first message is composed by the HARNESS (not the model)
+ * from three deterministic parts, matching the reference control-plane handoff:
+ *
+ *  1. {@link WORKER_OPERATING_ENVELOPE} -- a fixed framework preamble (the
+ *     worker "system prompt" equivalent): autonomy, scope discipline, read-only
+ *     GitHub + surface-one-typed-action, evidence discipline, and the standing
+ *     instruction to always finish via the emit-result contract. It is mounted
+ *     onto EVERY worker regardless of role, exactly like the framework
+ *     emit-result skill (design 5.1 / 2.3).
+ *  2. The mounted skills persona (role skills + learned patterns + the
+ *     emit-result contract), composed by the file store's `mountRoles`.
+ *  3. {@link buildWorkerBrief} -- a rich, self-contained TASK brief authored per
+ *     role: decision framing, objective, concrete steps, scope/constraints, and
+ *     the evidence/acceptance expectations, ending with the standing emit-result
+ *     instruction. No back-references; the worker can act from this alone.
+ *
+ * This module is pure and unit-testable; the file store supplies the persona and
+ * the dispatcher supplies the session runtime.
+ */
+
+/**
+ * The fixed operating envelope mounted onto every worker (framework-owned, like
+ * emit-result). Ported from the reference `ambient_worker_system_prompt`: it is a
+ * code constant, not a learnable skill, so learning can never weaken it.
+ */
+export const WORKER_OPERATING_ENVELOPE = [
+	'You are an ambient worker session dispatched by Diffy, the always-on SDLC coordinator, to produce exactly one decision-ready result for a human reviewer. Operate under these fixed rules:',
+	'',
+	'- Own the full investigation, validation, and reporting for the single work item in the task brief below. Work only within its repository; do not touch unrelated repositories, branches, or code, and do not spin off unrelated work.',
+	'- Use GitHub reads freely to gather evidence (issues, pull requests, commits, checks, diffs, and logs), but never mutate GitHub state yourself: do not close or comment on issues, and do not create, merge, edit, or review pull requests, nor call any write API. To request a change, surface exactly one typed action in your emitted result; the host performs it under the user\'s identity only after explicit confirmation.',
+	'- Ground every claim in a real receipt (a run log, a diff, a review thread, a test output). Never fabricate a receipt. If you cannot produce trustworthy evidence, emit no action and report the blocker honestly instead.',
+	'- You run fully autonomously with no interactive user available. Never ask questions, request confirmation, or wait for input. Make the best-judgment decision, state any assumption in your result, and continue.',
+	'- The skills mounted below are your operating guidance. Explicit instructions in the task brief take priority, and learned patterns never expand your autonomy, permissions, tools, or scope.',
+	'- Always finish by following the emit-result contract exactly: one typed action, a short label, and an evidence pack, ending your final message with the single machine-readable result block.',
+].join('\n');
+
+/** Human-legible label for the event subject a worker is dispatched for. */
+function describeSubject(task: ILogicalTask): string {
+	const subject = task.sourceEvent.subject;
+	const attached = subject.attachedTo ? `, attached to ${subject.attachedTo.kind} #${subject.attachedTo.id}` : '';
+	switch (subject.kind) {
+		case 'pr': return `pull request #${subject.id}`;
+		case 'issue': return `issue #${subject.id}`;
+		case 'issue-cluster': return `issue cluster ${subject.id}`;
+		case 'check': return `failing check ${subject.id}${attached}`;
+		case 'security': return `security alert ${subject.id}${attached}`;
+		case 'deploy': return `deployment ${subject.id}`;
+		case 'branch': return `branch ${subject.id}`;
+		default: return `${subject.kind} ${subject.id}`;
+	}
+}
+
+interface IRoleBrief {
+	/** One-line decision framing: what human decision this worker must enable. */
+	readonly framing: string;
+	readonly objective: string;
+	readonly steps: readonly string[];
+	readonly constraints: readonly string[];
+}
+
+function roleBrief(role: WorkerRole): IRoleBrief {
+	switch (role) {
+		case WorkerRole.IssueTriage:
+			return {
+				framing: 'Decide how the incoming issue work should be organized so the team can act on it.',
+				objective: 'Read the newly opened or labeled issue(s) in scope and determine how they should be organized: cluster them by shared root cause or customer ask, and identify any single theme that is ready to be fixed directly.',
+				steps: [
+					'Read each in-scope issue end to end: title, body, labels, and recent comments.',
+					'Group issues that describe the same underlying problem (same root cause, reproduction, or customer request); prefer a few strong themes over many weak ones.',
+					'Name each theme in short, specific, actionable language a human can act on (for example "session-expiry on mobile Safari", not "bugs").',
+					'Cite the exact issue numbers that belong to each theme as receipts, and note any uncertain membership so the human can re-split it.',
+				],
+				constraints: [
+					'Group only when the symptoms and requested outcomes genuinely align; preserve distinct edge cases rather than over-merging.',
+					'Rank customer impact using authoritative issue, label, and assignee metadata, not speculation.',
+				],
+			};
+		case WorkerRole.CodeReview:
+			return {
+				framing: 'Decide whether this pull request is safe to approve, or exactly what must change first.',
+				objective: 'Review this pull request for consequence and correctness and determine whether it is safe to approve, or precisely what must change before it can be.',
+				steps: [
+					'Read the pull request end to end: description, full diff, any linked issue, and the CI checks.',
+					'Assess the correctness, test coverage, and risk of the actual change - not its formatting.',
+					'Confirm the checks that matter are green, naming each one and its conclusion.',
+					'Decide: approve, or list the specific high-confidence problems that block approval, each paired with the evidence supporting it.',
+				],
+				constraints: [
+					'Report only high-confidence problems and show the concrete evidence for each conclusion.',
+					'Do not raise style, formatting, or subjective nits; review consequence, not cosmetics.',
+				],
+			};
+		case WorkerRole.ImplementFix:
+		default:
+			return {
+				framing: 'Decide whether the failure is fixed and the change is safe to land.',
+				objective: 'Reproduce the failure, produce a minimal verified fix on a work branch, and confirm the previously failing check now passes.',
+				steps: [
+					'Read the failure: check name, conclusion, annotations, and output, plus the pull request or branch it belongs to.',
+					'Reproduce the failure with an exact, named command before changing anything.',
+					'Make the smallest change that addresses the root cause, reusing existing patterns in the codebase.',
+					'Re-run the exact check or command and confirm it now passes, capturing that run as a receipt.',
+				],
+				constraints: [
+					'Separate diagnosis from remediation, and state the exact failing scope plus any paths you did not verify.',
+					'Keep the change surgical and do not expand scope. Commit only to a work branch; never target the default branch directly - surface a typed action for any GitHub change.',
+				],
+			};
+	}
+}
+
+/**
+ * Builds the self-contained TASK brief for a worker (technical spec 2.2 step 4).
+ * Rich, role-specific, and free of back-references, so the worker can act from
+ * this brief plus its mounted skills alone. Deterministic and pure.
+ */
+export function buildWorkerBrief(role: WorkerRole, task: ILogicalTask): string {
+	const repo = task.repo ?? 'the target repository';
+	const trigger = `${task.sourceEvent.type}${task.sourceEvent.action ? '.' + task.sourceEvent.action : ''}`;
+	const rb = roleBrief(role);
+
+	const lines: string[] = [
+		`# Task: ${rb.framing}`,
+		'',
+		'## Work item',
+		`- Repository: ${repo}`,
+		`- Subject: ${describeSubject(task)}`,
+		`- Trigger: ${trigger}`,
+		'',
+		'## Objective',
+		rb.objective,
+		'',
+		'## How to proceed',
+		...rb.steps.map((s, i) => `${i + 1}. ${s}`),
+		'',
+		'## Scope and constraints',
+		...rb.constraints.map(c => `- ${c}`),
+		'',
+		'## Evidence and acceptance',
+		'- Lead your result with the single most important consequence for the human, in one sentence.',
+		'- Provide two to three claims, each naming a concrete quantity and its verification method (an exact command, a named CI check and its conclusion, or the files changed with counts), paired with a real receipt link.',
+		'- State exactly one honest "Not verified" line covering the concrete, decision-relevant gap you did not confirm; omit speculative edge cases.',
+		'- Propose exactly one typed action the human can take in a single click, or none if you are reporting a blocker.',
+		'',
+		'## Final step',
+		'As the final step, follow the mounted emit-result skill and produce the structured action, a label of at most three to four words, and the evidence pack, ending your final message with the single `inbox-one-result` JSON block. Do not invent action types or fabricate receipts; the host validates the action against the catalog and rejects anything malformed.',
+	];
+	return lines.join('\n');
+}
+
+/**
+ * Composes the worker's first message from the fixed operating envelope, the
+ * mounted skills persona, and the task brief (technical spec 2.2-2.3). The
+ * harness owns this composition; `personaText` comes from the file store's
+ * `mountRoles` (role skills + learned patterns + the emit-result contract) and
+ * may be empty when no skills match the role (the brief still stands alone).
+ */
+export function composeWorkerFirstMessage(personaText: string, brief: string): string {
+	const parts: string[] = [WORKER_OPERATING_ENVELOPE];
+	const persona = personaText.trim();
+	if (persona.length > 0) {
+		parts.push(persona);
+	}
+	parts.push('---', brief.trim());
+	return parts.join('\n\n');
+}

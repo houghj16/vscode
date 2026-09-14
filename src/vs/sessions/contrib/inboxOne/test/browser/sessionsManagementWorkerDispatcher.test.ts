@@ -12,8 +12,11 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { ISession } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { WorkerRole } from '../../common/eventTaxonomy.js';
+import { IInboxOneFileStore } from '../../common/inboxOneFileStore.js';
+import { IMountResult } from '../../common/roleMount.js';
 import { EventSource, ILogicalTask, LogicalTaskState } from '../../common/inboxOneTypes.js';
 import { IWorkerDispatchRequest } from '../../common/workerDispatcher.js';
+import { WORKER_OPERATING_ENVELOPE } from '../../common/workerBrief.js';
 import { INBOX_ONE_SESSION_META, SessionsManagementWorkerDispatcher } from '../../browser/sessionsManagementWorkerDispatcher.js';
 
 function fakeSession(ref: string): ISession {
@@ -51,6 +54,21 @@ function fakeWorkspace(folder: URI | undefined): IWorkspaceContextService {
 	return { getWorkspace: () => ({ folders: folder ? [{ uri: folder }] : [] }) } as unknown as IWorkspaceContextService;
 }
 
+/** Fake file store whose `mountRoles` returns a recognizable persona so the test can assert the harness mounts it. */
+class FakeFileStore {
+	readonly mountedRoles: string[][] = [];
+	persona = '## skill: review-consequence\nReview consequence, not formatting.';
+	failMount = false;
+	async mountRoles(roleNames: readonly string[]): Promise<IMountResult> {
+		this.mountedRoles.push([...roleNames]);
+		if (this.failMount) {
+			throw new Error('file store unavailable');
+		}
+		return { personaText: this.persona, skillIds: ['review-consequence', 'emit-result'], patternIds: [] };
+	}
+	asService(): IInboxOneFileStore { return this as unknown as IInboxOneFileStore; }
+}
+
 function task(): ILogicalTask {
 	return {
 		id: 'task-1', inboxId: 'my', groupKey: 'acme/api:pr:842', type: 'code-review', state: LogicalTaskState.Cooking,
@@ -67,24 +85,48 @@ suite('Inbox One - SessionsManagementWorkerDispatcher', () => {
 
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	function make(sessions: FakeSessions, folder: URI | undefined) {
-		return new SessionsManagementWorkerDispatcher(sessions.asService(), fakeWorkspace(folder), disposables.add(new NullLogService()));
+	function make(sessions: FakeSessions, folder: URI | undefined, fileStore: FakeFileStore = new FakeFileStore()) {
+		return new SessionsManagementWorkerDispatcher(sessions.asService(), fakeWorkspace(folder), fileStore.asService(), disposables.add(new NullLogService()));
 	}
 
 	test('creates a real worker session and returns its resource ref', async () => {
 		const sessions = new FakeSessions();
 		sessions.createResult = fakeSession('agent-host-session://acme/worker-1');
-		const dispatcher = make(sessions, URI.file('/repo'));
+		const fileStore = new FakeFileStore();
+		const dispatcher = make(sessions, URI.file('/repo'), fileStore);
 
 		const result = await dispatcher.dispatch(request());
 
 		assert.strictEqual(result.reused, false);
 		assert.strictEqual(result.sessionRef, 'agent-host-session://acme/worker-1');
 		assert.strictEqual(sessions.created.length, 1);
-		assert.strictEqual(sessions.created[0].query, 'Review PR #842. Emit a decision-ready result.');
+		// The harness composes the first message from the fixed operating envelope,
+		// the mounted skills persona (mountRoles for the role), and the brief.
+		const query = sessions.created[0].query;
+		assert.ok(query.includes(WORKER_OPERATING_ENVELOPE), 'includes the operating envelope');
+		assert.ok(query.includes('Review consequence, not formatting.'), 'includes the mounted role persona');
+		assert.ok(query.includes('Review PR #842. Emit a decision-ready result.'), 'includes the task brief');
+		assert.deepStrictEqual(fileStore.mountedRoles, [[WorkerRole.CodeReview]], 'mounts skills for the dispatched role');
 		// Metadata stamps the task/role so lifecycle events resolve back (G15).
 		assert.strictEqual(sessions.created[0].metadata![INBOX_ONE_SESSION_META.role], WorkerRole.CodeReview);
 		assert.strictEqual(sessions.created[0].metadata![INBOX_ONE_SESSION_META.taskId], 'task-1');
+	});
+
+	test('degrades to a persona-less first message when the file store fails', async () => {
+		const sessions = new FakeSessions();
+		sessions.createResult = fakeSession('agent-host-session://acme/worker-1');
+		const fileStore = new FakeFileStore();
+		fileStore.failMount = true;
+		const dispatcher = make(sessions, URI.file('/repo'), fileStore);
+
+		const result = await dispatcher.dispatch(request());
+
+		assert.strictEqual(result.reused, false);
+		assert.strictEqual(sessions.created.length, 1);
+		const query = sessions.created[0].query;
+		assert.ok(query.includes(WORKER_OPERATING_ENVELOPE), 'still includes the operating envelope');
+		assert.ok(query.includes('Review PR #842. Emit a decision-ready result.'), 'the self-contained brief still stands');
+		assert.ok(!query.includes('Review consequence, not formatting.'), 'no persona when mounting fails');
 	});
 
 	test('defers gracefully when no session target is available (no host)', async () => {
