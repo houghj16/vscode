@@ -5,6 +5,7 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
+import product from '../../../../platform/product/common/product.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IAutomationStorageService } from '../../automations/common/automationStorageService.js';
@@ -48,7 +49,9 @@ export class LearningOrchestratorService extends Disposable {
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
-		const distiller = this._register(instantiationService.createInstance(DistillerSessionDispatcher));
+		// Dev builds fall back to an in-window simulated distiller with no host, so
+		// the learning loop runs headless; never simulated in stable builds.
+		const distiller = this._register(instantiationService.createInstance(DistillerSessionDispatcher, product.quality !== 'stable'));
 		this.orchestrator = new LearningOrchestrator(fileStore, storage, logService, distiller.distill);
 		this.ready = fileStore.initialize();
 		this._register(autorun(reader => {

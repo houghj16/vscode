@@ -10,7 +10,7 @@ import { IWorkspaceContextService } from '../../../../platform/workspace/common/
 import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import { buildDistillerBrief, parseProposedSkill } from '../common/distillerBrief.js';
+import { buildDistillerBrief, parseProposedSkill, simulateDistillerProposal } from '../common/distillerBrief.js';
 import { IInboxOneFileStore, IStoredSkill } from '../common/inboxOneFileStore.js';
 import { IExperienceRecord, LearningTarget } from '../common/learningLoop.js';
 import { mapSessionStatusToEventType } from '../common/sessionEventMapping.js';
@@ -43,6 +43,8 @@ function reconstructSkill(skill: IStoredSkill): string {
 export class DistillerSessionDispatcher extends Disposable {
 
 	constructor(
+		/** Dev builds fall back to an in-window simulated distiller when no host is connected. */
+		private readonly simulateWhenNoHost: boolean,
 		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
 		@IInboxOneFileStore private readonly fileStore: IInboxOneFileStore,
 		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
@@ -54,13 +56,13 @@ export class DistillerSessionDispatcher extends Disposable {
 
 	/** Wire this as {@link LearningOrchestrator}'s `distillOne`. */
 	readonly distill = async (record: IExperienceRecord, target: LearningTarget): Promise<void> => {
-		const folder = this.workspaceContext.getWorkspace().folders[0]?.uri;
-		if (!folder || !this.sessions.isNewSessionTargetAvailable(folder)) {
-			this.logService.trace('[inboxOne] distiller deferred (no connected agent host)');
-			return;
-		}
 		// The role's own (non-framework) skill is the update target.
 		const skill = record.role ? (await this.fileStore.listSkills()).find(s => !s.isFramework && s.frontmatter.roles.includes(record.role!)) : undefined;
+		const folder = this.workspaceContext.getWorkspace().folders[0]?.uri;
+		if (!folder || !this.sessions.isNewSessionTargetAvailable(folder)) {
+			await this.distillSimulated(record, target, skill);
+			return;
+		}
 		const brief = buildDistillerBrief(record, target, skill ? reconstructSkill(skill) : undefined);
 		try {
 			const session = await this.sessions.createAndSendNewChatRequest(
@@ -75,6 +77,31 @@ export class DistillerSessionDispatcher extends Disposable {
 			this.logService.warn(`[inboxOne] distiller dispatch failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	};
+
+	/**
+	 * The headless learning path (dev builds, no host): stand in for the distiller
+	 * agent by folding the resolved lesson into the skill and writing a new
+	 * version through the same host {@link IInboxOneFileStore.writeSkill} path, so
+	 * the learning loop is fully exercised and the skill visibly evolves. A no-op
+	 * (deferral) in stable builds or when there is no skill to evolve.
+	 */
+	private async distillSimulated(record: IExperienceRecord, target: LearningTarget, skill: IStoredSkill | undefined): Promise<void> {
+		if (!this.simulateWhenNoHost || !skill) {
+			this.logService.trace('[inboxOne] distiller deferred (no connected agent host)');
+			return;
+		}
+		const proposed = simulateDistillerProposal(record, target, reconstructSkill(skill));
+		if (!proposed) {
+			this.logService.trace(`[inboxOne] (sim) distiller proposed no change to ${skill.frontmatter.id}`);
+			return;
+		}
+		try {
+			await this.fileStore.writeSkill(skill.frontmatter.id, proposed);
+			this.logService.info(`[inboxOne] (sim) distiller updated skill ${skill.frontmatter.id} (new version)`);
+		} catch (err) {
+			this.logService.warn(`[inboxOne] (sim) distiller write failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
 
 	/** One-shot: when the distiller session finishes, read + apply its proposed skill. */
 	private applyOnComplete(session: ISession, skillId: string): void {

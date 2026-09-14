@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { buildDistillerBrief, DISTILLER_SKILL_FENCE, parseProposedSkill } from '../../common/distillerBrief.js';
+import { buildDistillerBrief, DISTILLER_SKILL_FENCE, parseProposedSkill, simulateDistillerProposal } from '../../common/distillerBrief.js';
 import { GestureKind } from '../../common/inboxOneTypes.js';
 import { IExperienceRecord, LearningTarget } from '../../common/learningLoop.js';
 
@@ -51,5 +51,31 @@ suite('Inbox One - distiller brief', () => {
 		assert.strictEqual(parseProposedSkill('no block, no change'), undefined);
 		assert.strictEqual(parseProposedSkill(`\`\`\`${DISTILLER_SKILL_FENCE}\nnot frontmatter\n\`\`\``), undefined, 'body without frontmatter rejected');
 		assert.strictEqual(parseProposedSkill(''), undefined);
+	});
+
+	suite('simulateDistillerProposal (dev headless learning)', () => {
+		const current = '---\nid: review-consequence\nroles: [code-review]\nversion: 1\n---\n# Review consequence\nReview consequence, not formatting.';
+
+		test('folds a steer lesson into the skill and stays a valid SKILL.md', () => {
+			const proposed = simulateDistillerProposal(record({ steeringTranscript: 'Prefer squash merges. Keep history linear.' }), LearningTarget.RoleSkillLesson, current);
+			assert.ok(proposed, 'a steer proposes an update');
+			assert.ok(proposed!.startsWith('---'), 'keeps frontmatter so writeSkill/parseProposedSkill accept it');
+			assert.ok(parseProposedSkill('```' + DISTILLER_SKILL_FENCE + '\n' + proposed + '\n```') === proposed, 'round-trips through the proposal parser');
+			assert.ok(proposed!.includes('## Learned'));
+			assert.ok(proposed!.includes('Prefer squash merges.'), 'includes the steering signal');
+		});
+
+		test('reinforces on accept, and is idempotent for the same lesson', () => {
+			const once = simulateDistillerProposal(record({ gesture: GestureKind.Accept }), LearningTarget.ReinforceRoleSkill, current);
+			assert.ok(once && once.includes('keep leading with the approach that worked'));
+			// Feeding the already-updated skill back in must not append the same lesson again.
+			assert.strictEqual(simulateDistillerProposal(record({ gesture: GestureKind.Accept }), LearningTarget.ReinforceRoleSkill, once), undefined);
+		});
+
+		test('proposes nothing for a coordinator-skill target or when there is no skill', () => {
+			assert.strictEqual(simulateDistillerProposal(record(), LearningTarget.CoordinatorSkill, current), undefined);
+			assert.strictEqual(simulateDistillerProposal(record(), LearningTarget.RoleSkillLesson, undefined), undefined);
+			assert.strictEqual(simulateDistillerProposal(record(), LearningTarget.RoleSkillLesson, 'not a skill'), undefined);
+		});
 	});
 });
