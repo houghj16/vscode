@@ -25,6 +25,7 @@ import { INBOX_ONE_ACTIONS, INBOX_ONE_DEV_ACTIONS } from './inboxOneCommands.js'
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
+import { LearningOrchestratorService } from './learningOrchestratorService.js';
 import { NotificationOrchestrator } from './notificationOrchestrator.js';
 import { WebhookIngressService } from './webhookIngressService.js';
 import { InboxOneSettingsView } from './inboxOneSettingsView.js';
@@ -145,6 +146,8 @@ class InboxOneContribution extends Disposable implements IWorkbenchContribution 
 		// The webhook ingress wires the steady-state transport seam (backfill on
 		// downtime recovery only; no periodic polling).
 		this._register(instantiationService.createInstance(WebhookIngressService));
+		// The learning loop runs the distiller/curator on every task resolution.
+		this._register(instantiationService.createInstance(LearningOrchestratorService));
 	}
 }
 
