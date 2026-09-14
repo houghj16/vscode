@@ -5,6 +5,7 @@
 
 import { IRawWorkerResult } from './emitResult.js';
 import { ILogicalTask } from './inboxOneTypes.js';
+import { parseWorkerResult, deriveRankSignals } from './parseWorkerResult.js';
 import { IRankSignals } from './ranking.js';
 
 /**
@@ -33,4 +34,36 @@ export interface IWorkerResultReader {
 	 * attempt as failed). Never throws for a missing result.
 	 */
 	read(task: ILogicalTask, sessionRef: string): Promise<IWorkerOutput | undefined>;
+}
+
+/**
+ * Provides the final assistant message of a worker session (its transcript tail),
+ * from which the emit-result block is parsed. Reading a real session transcript is
+ * provider-specific, so it lives behind this seam; the reader logic is pure.
+ */
+export interface ITranscriptSource {
+	readFinalMessage(task: ILogicalTask, sessionRef: string): Promise<string | undefined>;
+}
+
+/**
+ * The {@link IWorkerResultReader} that turns a worker's final message into a
+ * validated-upstream {@link IWorkerOutput}: it reads the transcript tail via an
+ * {@link ITranscriptSource}, parses the emit-result block, and derives the
+ * host-authoritative ranking signals. Pure and unit-testable; only the transcript
+ * source is host-specific.
+ */
+export class TranscriptWorkerResultReader implements IWorkerResultReader {
+	constructor(private readonly source: ITranscriptSource) { }
+
+	async read(task: ILogicalTask, sessionRef: string): Promise<IWorkerOutput | undefined> {
+		const text = await this.source.readFinalMessage(task, sessionRef);
+		if (!text) {
+			return undefined;
+		}
+		const result = parseWorkerResult(text);
+		if (!result) {
+			return undefined;
+		}
+		return { result, signals: deriveRankSignals(result, task) };
+	}
 }

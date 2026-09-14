@@ -36,22 +36,36 @@ As the final step of your work, produce a single structured result with exactly
 these parts:
 
 1. A typed action. Choose exactly one action_type from the fixed catalog:
-   merge_pr, approve_pr, comment, add_labels, create_issues, dispatch_fix,
-   deploy, grant_scope. Provide a payload that matches that action's schema. Do
-   not invent action types or fields; the host validates and rejects anything out
-   of catalog.
+merge_pr, approve_pr, comment, add_labels, create_issues, dispatch_fix,
+deploy, grant_scope. Provide a payload that matches that action's schema. Do
+not invent action types or fields; the host validates and rejects anything out
+of catalog.
 
 2. A short action label. Author a free-form, task-specific button label of at
-   most 3-4 words (for example: "Approve PR", "Group issues", "Merge fix"). The
-   label is display-only and never changes what executes.
+most 3-4 words (for example: "Approve PR", "Group issues", "Merge fix"). The
+label is display-only and never changes what executes.
 
 3. An evidence pack. Lead with the consequence in one sentence. Provide 2-3
-   claims, each a short human-legible statement paired with a real receipt link
-   (a run log, a diff, a review thread, a test output). End with exactly one
-   honest "Not verified" gap line stating what you did not confirm.
+claims, each a short human-legible statement paired with a real receipt link
+(a run log, a diff, a review thread, a test output). End with exactly one
+honest "Not verified" gap line stating what you did not confirm.
 
 Ground every claim in a real receipt. Never fabricate a receipt. If you cannot
 produce trustworthy evidence, emit no action and report the blocker instead.
+
+## Machine-readable output (required)
+
+As the very last thing in your final message, emit the result as a single fenced
+code block tagged \`inbox-one-result\` containing one JSON object with these
+fields (the host parses this block; prose above it is ignored):
+
+\`\`\`inbox-one-result
+{"action_type": "approve_pr", "payload": {"repo": "owner/name", "prNumber": 842}, "label": "Approve PR", "decisionSentence": "PR #842 is ready to approve", "claims": [{"text": "47/47 checks pass", "receiptLink": "https://.../runs/1", "rung": 1}], "gapLine": "Not verified: behavior under production load"}
+\`\`\`
+
+Emit exactly one such block. Omit \`action_type\`/\`payload\`/\`label\` only when you
+are reporting a blocker with no action. The host validates the action against the
+catalog and rejects anything malformed.
 `;
 
 const GROUP_ISSUES_BY_THEME = `---
@@ -71,14 +85,14 @@ each theme in plain language.
 
 1. Read every issue in scope: title, body, labels, and recent comments.
 2. Group issues that describe the same underlying problem (same root cause, same
-   reproduction, or the same customer request). Prefer a small number of strong
-   themes over many weak ones.
+reproduction, or the same customer request). Prefer a small number of strong
+themes over many weak ones.
 3. Name each theme with a short, specific phrase a human can act on (for example
-   "session-expiry on mobile Safari", not "bugs").
+"session-expiry on mobile Safari", not "bugs").
 4. For each theme, record which issue numbers belong and one sentence of why they
-   group together, citing the issues as receipts.
+group together, citing the issues as receipts.
 5. Note any issue whose membership is uncertain in the "Not verified" gap line so
-   the human can re-split it by steering.
+the human can re-split it by steering.
 
 ## Result
 
@@ -103,14 +117,14 @@ Turn a red CI check into a minimal, verified fix with strong evidence.
 ## Workflow
 
 1. Read the failed check information: check name, conclusion, annotations, and
-   output, plus the pull request or branch it belongs to.
+output, plus the pull request or branch it belongs to.
 2. Reproduce the failure locally. For a suspected flake, run the affected test
-   repeatedly (for example 50 times) to establish the failure rate first.
+repeatedly (for example 50 times) to establish the failure rate first.
 3. Identify the root cause from the annotations, output, and a reading of the
-   changed code. Prefer the smallest change that addresses the cause.
+changed code. Prefer the smallest change that addresses the cause.
 4. Make a minimal diff. Avoid unrelated changes unless they are required.
 5. Verify: run the affected test many times (for example 50x green) and run the
-   relevant build/lint to confirm the failure is gone and nothing regressed.
+relevant build/lint to confirm the failure is gone and nothing regressed.
 6. Collect receipts: the failing run, the passing run(s), and the diff.
 
 ## Result
@@ -138,12 +152,12 @@ decision-ready approval recommendation.
 
 1. Read the pull request: description, the diff, and the linked issue if any.
 2. Determine the behavioral delta: what observable behavior changes, and which
-   code paths are affected. State it in one sentence.
+code paths are affected. State it in one sentence.
 3. Check the required signals: are all required checks passing (note any that
-   recently went red to green and why); is the change scoped to the intended path
-   or does it touch unrelated code; are there unresolved review threads.
+recently went red to green and why); is the change scoped to the intended path
+or does it touch unrelated code; are there unresolved review threads.
 4. Identify the single most important risk that is NOT verified (for example
-   behavior under production load) for the gap line.
+behavior under production load) for the gap line.
 5. Collect receipts: the checks run, the diff, and the review threads.
 
 ## Result
@@ -170,18 +184,18 @@ never do repository work yourself; you dispatch worker sessions and manage them.
 On each ambient event you get exactly one turn. Decide in four steps:
 
 1. Worth doing work? The host has already run its deterministic dispatch checks
-   (value, actionable, mandate, non-redundant, budget); if it dropped the event,
-   do nothing. Otherwise proceed.
+(value, actionable, mandate, non-redundant, budget); if it dropped the event,
+do nothing. Otherwise proceed.
 2. New or existing thread? Compare the subject to the live/recent thread
-   one-liners. Reuse a warm related session when it clearly matches; otherwise
-   start a new one. When reusing, re-scope explicitly: reset the working set and
-   restate the work item so prior context cannot contaminate.
+one-liners. Reuse a warm related session when it clearly matches; otherwise
+start a new one. When reusing, re-scope explicitly: reset the working set and
+restate the work item so prior context cannot contaminate.
 3. Select roles. Call select_roles([...]) with role name(s) from role_list.md
-   that fit the work. You may blend several. The harness attaches the skills;
-   never hand-copy skill text.
+that fit the work. You may blend several. The harness attaches the skills;
+never hand-copy skill text.
 4. Write the task brief. Emit a full, self-contained instruction for the worker:
-   the problem, scope, constraints, and evidence/acceptance expectations, with no
-   back-references. The harness appends the emit-result contract.
+the problem, scope, constraints, and evidence/acceptance expectations, with no
+back-references. The harness appends the emit-result contract.
 
 Prioritization and autonomy: tiering is the host's policy; you supply normalized
 signals, never final numbers. Surface what the human owns and de-emphasize what
