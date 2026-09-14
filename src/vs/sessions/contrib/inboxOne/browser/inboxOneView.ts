@@ -97,6 +97,11 @@ export class InboxOneView extends AbstractCustomView {
 
 	render(container: HTMLElement): void {
 		container.classList.add('inbox-one-view');
+		// The shared custom-view host is tabindex=-1 and shows a focus-fallback
+		// outline when a click lands on a non-focusable row. This view manages its
+		// own selection highlight, so suppress that outline robustly via an inline
+		// !important rule (beats the shared stylesheet regardless of load order).
+		container.style.setProperty('outline', 'none', 'important');
 		const panes = container.appendChild($('.inbox-one-panes'));
 
 		const left = panes.appendChild($('.inbox-one-left'));

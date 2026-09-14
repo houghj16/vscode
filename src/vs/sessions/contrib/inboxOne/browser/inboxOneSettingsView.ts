@@ -60,6 +60,7 @@ export class InboxOneSettingsView extends AbstractCustomView {
 
 	render(container: HTMLElement): void {
 		container.classList.add('inbox-one-view');
+		container.style.setProperty('outline', 'none', 'important');
 		this.root = container.appendChild($('.inbox-one-settings'));
 		this.settings.initialize().then(() => this.rerender(), () => this.rerender());
 		this._register(this.settings.onDidChange(() => this.rerender()));

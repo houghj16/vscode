@@ -42,6 +42,7 @@ export class InboxOneSkillsView extends AbstractCustomView {
 
 	render(container: HTMLElement): void {
 		container.classList.add('inbox-one-view');
+		container.style.setProperty('outline', 'none', 'important');
 		this.root = container.appendChild($('.inbox-one-panes'));
 		void this.rerender();
 	}
