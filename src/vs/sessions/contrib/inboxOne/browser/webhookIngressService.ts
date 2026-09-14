@@ -4,13 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../base/common/event.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { joinPath } from '../../../../base/common/resources.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 import { IGitHubService } from '../../github/browser/githubService.js';
 import { IEventIngress } from '../common/eventIngress.js';
 import { fetchBackfillPage } from '../common/githubBackfillFetcher.js';
+import { INBOX_ONE_WEBHOOK_EVENTS } from '../common/githubWebhookRegistrar.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IDropLedgerEntry, IIngressEvent } from '../common/inboxOneTypes.js';
@@ -90,13 +93,14 @@ export class WebhookIngressService extends Disposable {
 			setCursor: (repo: string, cursor: string) => store.setCursor(repo, cursor),
 			enrolledRepos: () => settings.listEnrollments().filter(e => e.active).map(e => e.repo),
 		};
+		const dropDir = FileDropReceiverAdapter.dropDirectoryFor(environmentService.userRoamingDataHome);
 		// The physical receiver runs in a companion node process that HMAC-verifies
 		// each GitHub delivery and drops it into a watched directory; this adapter
 		// re-emits those into the tested WebhookIngress orchestration. It degrades to
 		// a startup-only recovery (one backfill, no live deliveries) where no local
 		// disk provider exists (a pure web harness).
 		const receiver: IReceiverAdapter = fileService.hasProvider(environmentService.userRoamingDataHome)
-			? new FileDropReceiverAdapter(FileDropReceiverAdapter.dropDirectoryFor(environmentService.userRoamingDataHome), fileService, logService)
+			? new FileDropReceiverAdapter(dropDir, fileService, logService)
 			: new StartupRecoveryReceiverAdapter();
 		const webhook = this._register(new WebhookIngress(
 			this._register(receiver),
@@ -104,10 +108,33 @@ export class WebhookIngressService extends Disposable {
 			host,
 			logService,
 		));
+
+		// Publish the enrollment-driven companion config so the receiver process
+		// forwards exactly the enrolled repos (nothing hardcoded). Re-published on
+		// every enrollment change so `gh webhook forward` is reconciled live.
+		const configUri = joinPath(environmentService.userRoamingDataHome, 'inboxOneWebhook', 'config.json');
+		const writeCompanionConfig = async (): Promise<void> => {
+			if (!fileService.hasProvider(configUri)) {
+				return;
+			}
+			try {
+				const config = {
+					repos: settings.listEnrollments().filter(e => e.active).map(e => e.repo),
+					events: INBOX_ONE_WEBHOOK_EVENTS,
+					dropDir: dropDir.fsPath,
+					updatedAt: Date.now(),
+				};
+				await fileService.writeFile(configUri, VSBuffer.fromString(JSON.stringify(config, null, 2)));
+			} catch (err) {
+				logService.trace(`[inboxOne] companion config write skipped: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		};
+
 		// Load enrollments before the startup backfill fires, so it has repos to catch up.
 		settings.initialize()
-			.then(() => webhook.start())
+			.then(() => { void webhook.start(); return writeCompanionConfig(); })
 			.catch(err => logService.error('[inboxOne] webhook ingress start failed', err));
+		this._register(settings.onDidChange(() => void writeCompanionConfig()));
 		logService.trace('[inboxOne] webhook ingress ready (drop receiver + startup backfill; no periodic polling)');
 	}
 }
