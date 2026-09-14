@@ -117,7 +117,13 @@ export class CoordinatorEngine {
 		}
 		switch (event.type) {
 			case 'task_finished':
-				await this.landWorkerResult(task);
+				// A conversation thread (not a dispatched worker) finishing is not an
+				// evidence-bearing result; leave its inbox item for the human to clear.
+				if (task.type === 'conversation') {
+					this.logService.trace(`[inboxOne] conversation ${event.sessionId} finished`);
+				} else {
+					await this.landWorkerResult(task);
+				}
 				break;
 			case 'needs_input':
 				await this.store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Worker needs input.' });

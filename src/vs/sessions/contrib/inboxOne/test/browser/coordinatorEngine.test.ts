@@ -13,9 +13,10 @@ import { IAutomationStorageCompareAndSwapResult, IAutomationStorageService } fro
 import { TriggerFamily } from '../../common/eventTaxonomy.js';
 import { InboxOneStore } from '../../browser/inboxOneStore.js';
 import { AutonomyLevel, IInboxOneSettings, INotificationPreferences, IRepoEnrollment } from '../../common/inboxOneSettings.js';
-import { EventSource, IEventSubject, IIngressEvent, LogicalTaskState, ActionType, InboxOneTier } from '../../common/inboxOneTypes.js';
+import { EventSource, IEventSubject, IIngressEvent, LogicalTaskState, ActionType, InboxOneTier, AttemptTrigger } from '../../common/inboxOneTypes.js';
 import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from '../../common/workerDispatcher.js';
 import { IWorkerOutput, IWorkerResultReader } from '../../common/workerResult.js';
+import { TaskTrigger } from '../../common/inboxOneStateMachine.js';
 
 class InMemoryCasStorage implements IAutomationStorageService {
 	declare readonly _serviceBrand: undefined;
@@ -229,6 +230,35 @@ suite('Inbox One - coordinator engine', () => {
 		// A failed attempt surfaces as a Decision + Retry, never a fabricated success.
 		assert.strictEqual(landed.state, LogicalTaskState.Decision);
 		assert.strictEqual(landed.evidence, undefined, 'no evidence was fabricated');
+	});
+
+	test('a finished conversation thread is NOT turned into a fabricated failed decision', async () => {
+		// A conversation thread (a chat Diffy did not dispatch) surfaced by triage
+		// as a Blocked inbox item. When it later completes, its lifecycle reaches the
+		// coordinator, but there is no emit-result block to parse: the guard must
+		// leave it for the human to clear rather than fail-parse it into a Decision.
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = validOutput();
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), new FakeDispatcher(), new NullLogService(), undefined, reader);
+
+		const sessionRef = 'agent-session://chat/abc';
+		const { task } = await store.upsertByGroupKey({
+			inboxId: 'my',
+			groupKey: 'session:abc',
+			sourceEvent: { deliveryId: 'c1', source: EventSource.Session, sessionId: sessionRef, type: 'needs_input', subject: { kind: 'session', id: 'abc' }, receivedAt: 0 },
+			type: 'conversation',
+			firstAttemptTrigger: AttemptTrigger.Hook,
+		});
+		await store.updateTask(task.id, { sessionRef });
+		await store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Open the conversation and reply.' });
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Blocked);
+
+		await engine.handleEvent({ deliveryId: 'cf1', source: EventSource.Session, sessionId: sessionRef, type: 'task_finished', subject: { kind: 'session', id: 'abc' }, receivedAt: 0 });
+
+		const landed = store.getTask(task.id)!;
+		assert.strictEqual(landed.state, LogicalTaskState.Blocked, 'the conversation stays Blocked, not a fabricated Decision');
+		assert.strictEqual(reader.reads.length, 0, 'no worker-result parse was attempted for a conversation');
 	});
 
 	test('a disabled trigger family drops', async () => {

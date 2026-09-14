@@ -25,6 +25,7 @@ import { INBOX_ONE_ACTIONS, INBOX_ONE_DEV_ACTIONS } from './inboxOneCommands.js'
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
+import { ChatTriageService } from './chatTriageService.js';
 import { LearningOrchestratorService } from './learningOrchestratorService.js';
 import { NotificationOrchestrator } from './notificationOrchestrator.js';
 import { SessionEventAdapterService } from './sessionEventAdapterService.js';
@@ -151,6 +152,8 @@ class InboxOneContribution extends Disposable implements IWorkbenchContribution 
 		this._register(instantiationService.createInstance(LearningOrchestratorService));
 		// Route Diffy's dispatched worker-session lifecycle back into the inbox (G15).
 		this._register(instantiationService.createInstance(SessionEventAdapterService));
+		// Surface conversation threads that need the human (ask_user) in the inbox.
+		this._register(instantiationService.createInstance(ChatTriageService));
 	}
 }
 
