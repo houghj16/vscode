@@ -32,6 +32,10 @@ VSCODE_SKIP_PRELAUNCH=1 DISPLAY="${DISPLAY:-:0}" setsid bash "$ROOT/scripts/code
 echo "[inbox-one-dev] launched desktop build (log: /tmp/inbox-desktop.log)"
 
 # 2) The companion webhook receiver (reads the app-published enrollment config).
+# Stop any prior companion first so a relaunch takes over cleanly (the companion
+# also self-guards via a lock file).
+pkill -f "inbox-one-webhook.mjs" 2>/dev/null || true
+sleep 1
 setsid node "$ROOT/scripts/inbox-one-webhook.mjs" --user-data-dir "$USER_DATA_DIR" \
 	</dev/null >/tmp/inbox-one-webhook.log 2>&1 &
 echo "[inbox-one-dev] launched webhook companion (log: /tmp/inbox-one-webhook.log)"

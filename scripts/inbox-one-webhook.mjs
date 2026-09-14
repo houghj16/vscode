@@ -26,7 +26,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 
 function parseArgs(argv) {
@@ -56,6 +56,30 @@ const events = args.events || '*';
 const port = Number(args.port || 0);
 
 fs.mkdirSync(dropDir, { recursive: true });
+
+// Singleton guard: two companions on the same drop dir would fight over the
+// `gh webhook forward` hooks. Claim a lock; exit if a live companion holds it.
+const lockPath = path.join(path.dirname(dropDir), 'companion.lock');
+try {
+	const existing = Number(fs.readFileSync(lockPath, 'utf8'));
+	if (existing && existing !== process.pid) {
+		let alive = false;
+		try { process.kill(existing, 0); alive = true; } catch { alive = false; }
+		if (alive) {
+			console.log(`[inbox-one-webhook] another companion (pid ${existing}) is running; exiting`);
+			process.exit(0);
+		}
+	}
+} catch { /* no lock yet */ }
+fs.writeFileSync(lockPath, String(process.pid));
+function releaseLock() {
+	try {
+		if (Number(fs.readFileSync(lockPath, 'utf8')) === process.pid) {
+			fs.unlinkSync(lockPath);
+		}
+	} catch { /* already gone */ }
+}
+
 
 /** Atomically drop one delivery as a JSON file the app's FileDropReceiverAdapter consumes. */
 function writeDelivery(delivery) {
@@ -108,35 +132,85 @@ const server = http.createServer((req, res) => {
 /** @type {Map<string, import('child_process').ChildProcess>} */
 const forwarders = new Map();
 
+/** The event set gh subscribes to ('*'); the coordinator filters by trigger family. */
+const GH_EVENTS = '*';
+
+/** Runs `gh api ...`, resolving parsed JSON (or undefined on failure). */
+function ghApi(apiArgs) {
+	return new Promise(resolve => {
+		execFile('gh', ['api', ...apiArgs], { env: process.env, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+			if (err) {
+				resolve(undefined);
+				return;
+			}
+			try {
+				resolve(JSON.parse(stdout));
+			} catch {
+				resolve(undefined);
+			}
+		});
+	});
+}
+
+/**
+ * `gh webhook forward` leaves a dev webhook (name `cli`, url on
+ * `webhook-forwarder.github.com`) if a prior run exited uncleanly, which makes the
+ * next `forward` fail with "Hook already exists". Delete only those so startup
+ * self-heals. Never touches the user's own webhooks.
+ */
+async function cleanupStaleForwardHooks(repo) {
+	const hooks = await ghApi([`repos/${repo}/hooks`, '--paginate']);
+	if (!Array.isArray(hooks)) {
+		return;
+	}
+	for (const h of hooks) {
+		const url = h && h.config && h.config.url;
+		if (h && h.name === 'cli' && typeof url === 'string' && url.startsWith('https://webhook-forwarder.github.com')) {
+			await ghApi(['-X', 'DELETE', `repos/${repo}/hooks/${h.id}`]);
+			console.log(`[inbox-one-webhook] cleaned stale dev webhook ${h.id} on ${repo}`);
+		}
+	}
+}
+
+/** Cleans stale hooks then starts one `gh webhook forward` for the repo. */
+async function startForwarder(repo, url, activeEvents) {
+	await cleanupStaleForwardHooks(repo);
+	if (!forwarders.has(repo)) {
+		return; // repo was removed from the config while we cleaned up
+	}
+	console.log(`[inbox-one-webhook] forwarding ${repo} (events=${GH_EVENTS}, coordinator filters to ${activeEvents}) -> ${url}`);
+	const child = spawn('gh', ['webhook', 'forward', `--repo=${repo}`, `--events=${GH_EVENTS}`, `--url=${url}`], {
+		stdio: ['ignore', 'inherit', 'inherit'],
+		env: process.env,
+	});
+	child.on('exit', code => {
+		console.log(`[inbox-one-webhook] forwarder for ${repo} exited (${code})`);
+		forwarders.delete(repo);
+	});
+	forwarders.set(repo, child);
+}
+
 function reconcileForwarders(config) {
 	const repos = config.repos;
 	const activeEvents = config.events || events;
 	const wanted = new Set(repos);
 	for (const [repo, child] of forwarders) {
 		if (!wanted.has(repo)) {
-			child.kill();
+			if (child) {
+				child.kill();
+			}
 			forwarders.delete(repo);
 		}
 	}
 	const url = `http://127.0.0.1:${server.address().port}/inbox-one/webhook`;
-	// `gh webhook forward` subscribes to all events ('*'); the coordinator's
-	// dispatch gate filters by trigger family, and '*' avoids a 422 that some
-	// individual (deprecated/permission-gated) event names trigger on create.
-	const ghEvents = '*';
 	for (const repo of wanted) {
 		if (forwarders.has(repo)) {
 			continue;
 		}
-		console.log(`[inbox-one-webhook] forwarding ${repo} (events=${ghEvents}, coordinator filters to ${activeEvents}) -> ${url}`);
-		const child = spawn('gh', ['webhook', 'forward', `--repo=${repo}`, `--events=${ghEvents}`, `--url=${url}`], {
-			stdio: ['ignore', 'inherit', 'inherit'],
-			env: process.env,
-		});
-		child.on('exit', code => {
-			console.log(`[inbox-one-webhook] forwarder for ${repo} exited (${code})`);
-			forwarders.delete(repo);
-		});
-		forwarders.set(repo, child);
+		// Reserve the slot so a concurrent reconcile does not double-start while the
+		// async stale-hook cleanup runs.
+		forwarders.set(repo, null);
+		void startForwarder(repo, url, activeEvents);
 	}
 }
 
@@ -178,10 +252,14 @@ server.listen(port, '127.0.0.1', () => {
 
 function shutdown() {
 	for (const child of forwarders.values()) {
-		child.kill();
+		if (child) {
+			child.kill();
+		}
 	}
+	releaseLock();
 	server.close();
 	process.exit(0);
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+process.on('exit', releaseLock);
