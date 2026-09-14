@@ -9,7 +9,7 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
-import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import product from '../../../../platform/product/common/product.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
@@ -25,6 +25,7 @@ import { INBOX_ONE_ACTIONS } from './inboxOneCommands.js';
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
+import { NotificationOrchestrator } from './notificationOrchestrator.js';
 import { InboxOneSettingsView } from './inboxOneSettingsView.js';
 import { InboxOneSkillsView } from './inboxOneSkillsView.js';
 import { WorkbenchInboxOneFileStore } from './workbenchInboxOneFileStore.js';
@@ -127,9 +128,12 @@ class InboxOneContribution extends Disposable implements IWorkbenchContribution 
 
 	constructor(
 		@IDiffyCoordinatorService _coordinator: IDiffyCoordinatorService,
+		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
 		// Resolving the coordinator eagerly wires ingress -> coordinator intake.
+		// The notification orchestrator turns pushable decisions into OS notifications.
+		this._register(instantiationService.createInstance(NotificationOrchestrator));
 	}
 }
 
