@@ -48,4 +48,11 @@ export interface IWorkerDispatchResult {
 	readonly sessionRef: string;
 	/** Whether an existing session was reused (warm context) vs newly created. */
 	readonly reused: boolean;
+	/**
+	 * Whether the dispatch could not actually start a worker (e.g. no agent host /
+	 * session target yet) and only recorded intent. The coordinator releases the
+	 * reserved admission slot for a deferred dispatch so it never leaks (a stuck
+	 * "no host" task must not permanently consume repo/global concurrency).
+	 */
+	readonly deferred?: boolean;
 }

@@ -208,6 +208,14 @@ export class CoordinatorEngine {
 				groupKey,
 				brief: this.briefFactory(role, task),
 			});
+			if (result.deferred) {
+				// The worker could not actually start (e.g. no agent host yet): record
+				// intent but RELEASE the reserved slot so a stuck "no host" task never
+				// permanently consumes admission (design 7.4). The task stays Cooking
+				// and is re-dispatchable when a target becomes available.
+				await this.admission.release(task.id, attemptIndex, task.repo);
+				this.logService.trace(`[inboxOne] task ${task.id} dispatch deferred; admission released`);
+			}
 			await this.store.updateTask(task.id, { sessionRef: result.sessionRef });
 		} catch (err) {
 			this.logService.error(`[inboxOne] dispatch failed for task ${task.id}`, err);

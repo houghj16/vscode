@@ -74,9 +74,11 @@ class FakeDispatcher implements IWorkerDispatcher {
 	dispatched: IWorkerDispatchRequest[] = [];
 	relays: { sessionRef: string; message: string }[] = [];
 	fail = false;
+	defer = false;
 	async dispatch(request: IWorkerDispatchRequest): Promise<IWorkerDispatchResult> {
 		if (this.fail) { throw new Error('dispatch failed'); }
 		this.dispatched.push(request);
+		if (this.defer) { return { sessionRef: `inboxone-pending://worker/${request.task.id}`, reused: false, deferred: true }; }
 		return { sessionRef: `session://worker/${request.task.id}`, reused: false };
 	}
 	async relay(sessionRef: string, message: string): Promise<void> { this.relays.push({ sessionRef, message }); }
@@ -166,6 +168,18 @@ suite('Inbox One - coordinator engine', () => {
 		assert.strictEqual(admission.released.length, 1);
 		const task = store.tasks.get()[0];
 		assert.strictEqual(task.state, LogicalTaskState.Decision); // failed attempt -> Decision + Retry
+	});
+
+	test('a deferred dispatch releases the admission slot but keeps the task cooking (no leak)', async () => {
+		const { store, dispatcher, admission, engine } = build();
+		dispatcher.defer = true;
+		await engine.handleEvent(prEvent());
+		// The slot is released so a stuck "no host" task never leaks admission...
+		assert.strictEqual(admission.released.length, 1);
+		const task = store.tasks.get()[0];
+		// ...but the task stays Cooking (recorded intent), not failed.
+		assert.strictEqual(task.state, LogicalTaskState.Cooking);
+		assert.ok(task.attempts[0].sessionRef?.startsWith('inboxone-pending://'), 'pending ref recorded');
 	});
 
 	test('a needs_input session event blocks the owning task', async () => {

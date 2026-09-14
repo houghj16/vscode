@@ -137,7 +137,7 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 	private deferred(request: IWorkerDispatchRequest, reason: string): IWorkerDispatchResult {
 		const sessionRef = `${PENDING_SCHEME}://worker/${generateUuid()}`;
 		this.logService.info(`[inboxOne] deferring ${request.role} dispatch for ${request.groupKey}: ${reason} (${sessionRef})`);
-		return { sessionRef, reused: false };
+		return { sessionRef, reused: false, deferred: true };
 	}
 
 	private async relaySafely(sessionRef: string, message: string): Promise<boolean> {
