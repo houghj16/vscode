@@ -16,6 +16,7 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { ICustomViewService } from '../../../services/customView/browser/customViewService.js';
 import { IDiffyCoordinatorService } from '../common/diffyCoordinator.js';
 import { IEventIngress } from '../common/eventIngress.js';
+import { IInboxOneFileStore } from '../common/inboxOneFileStore.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { DiffyCoordinatorService } from './diffyCoordinatorService.js';
@@ -25,14 +26,18 @@ import { InboxOneSettingsService } from './inboxOneSettingsService.js';
 import { InboxOneStore } from './inboxOneStore.js';
 import { InboxOneView } from './inboxOneView.js';
 import { InboxOneSettingsView } from './inboxOneSettingsView.js';
+import { InboxOneSkillsView } from './inboxOneSkillsView.js';
+import { WorkbenchInboxOneFileStore } from './workbenchInboxOneFileStore.js';
 
 export const INBOX_ONE_ENABLED_SETTING = 'inboxOne.enabled';
 const INBOX_ONE_VIEW_ID = 'sessions.inboxOne.view';
 const INBOX_ONE_SETTINGS_VIEW_ID = 'sessions.inboxOne.settings';
+const INBOX_ONE_SKILLS_VIEW_ID = 'sessions.inboxOne.skills';
 
 // --- shared services ---
 registerSingleton(IInboxOneStore, InboxOneStore, InstantiationType.Delayed);
 registerSingleton(IInboxOneSettings, InboxOneSettingsService, InstantiationType.Delayed);
+registerSingleton(IInboxOneFileStore, WorkbenchInboxOneFileStore, InstantiationType.Delayed);
 registerSingleton(IEventIngress, EventIngress, InstantiationType.Delayed);
 registerSingleton(IDiffyCoordinatorService, DiffyCoordinatorService, InstantiationType.Delayed);
 
@@ -55,6 +60,10 @@ class InboxOneViewContribution extends Disposable implements IWorkbenchContribut
 		this._register(customViewService.registerCustomView({
 			id: INBOX_ONE_SETTINGS_VIEW_ID,
 			ctor: new SyncDescriptor(InboxOneSettingsView),
+		}));
+		this._register(customViewService.registerCustomView({
+			id: INBOX_ONE_SKILLS_VIEW_ID,
+			ctor: new SyncDescriptor(InboxOneSkillsView),
 		}));
 	}
 }
@@ -91,6 +100,22 @@ class ShowSettingsAction extends Action2 {
 	}
 }
 registerAction2(ShowSettingsAction);
+
+/** Opens the Skills & Roles view. */
+class ShowSkillsAction extends Action2 {
+	constructor() {
+		super({
+			id: 'inboxOne.showSkills',
+			title: localize2('inboxOne.showSkills', 'Skills & Roles'),
+			category: localize2('inboxOne.category', 'Inbox One'),
+			f1: true,
+		});
+	}
+	run(accessor: ServicesAccessor): void {
+		accessor.get(ICustomViewService).showCustomView(INBOX_ONE_SKILLS_VIEW_ID);
+	}
+}
+registerAction2(ShowSkillsAction);
 
 /**
  * Boots the always-on coordinator so it begins observing the ambient event

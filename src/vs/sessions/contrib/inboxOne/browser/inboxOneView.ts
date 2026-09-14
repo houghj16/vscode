@@ -122,6 +122,9 @@ export class InboxOneView extends AbstractCustomView {
 
 		const settingsLink = brief.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.openSettings', 'Coordinator settings')));
 		this._register(addClick(settingsLink, () => void this.commandService.executeCommand('inboxOne.showSettings')));
+		brief.appendChild($('span', undefined, '  '));
+		const skillsLink = brief.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.openSkills', 'Skills & roles')));
+		this._register(addClick(skillsLink, () => void this.commandService.executeCommand('inboxOne.showSkills')));
 
 		const reference = this.diffyReference.get();
 		const referencedTask = reference ? tasks.find(t => t.id === reference.taskId) : undefined;

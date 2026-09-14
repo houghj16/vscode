@@ -443,3 +443,17 @@
 	gap: 8px;
 	margin-left: auto;
 }
+
+.inbox-one-skill-version {
+	font-weight: 400;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
+.inbox-one-skill-body {
+	white-space: pre-wrap;
+	font-size: 13px;
+	line-height: 1.4;
+	padding: 8px 0;
+	color: var(--vscode-foreground);
+}
