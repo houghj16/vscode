@@ -14,8 +14,10 @@ import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IIngressEvent } from '../common/inboxOneTypes.js';
 import { IWorkerDispatcher } from '../common/workerDispatcher.js';
+import { TranscriptWorkerResultReader } from '../common/workerResult.js';
 import { LiveAdmissionManager } from './liveAdmissionManager.js';
 import { SessionsManagementWorkerDispatcher } from './sessionsManagementWorkerDispatcher.js';
+import { WorkbenchTranscriptSource } from './workbenchTranscriptSource.js';
 
 /** MVP: a single personal inbox per user (design 7.7). Multi-inbox/team routing is deferred. */
 const PERSONAL_INBOX_ID = 'my';
@@ -48,7 +50,10 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 		super();
 		const admission = new LiveAdmissionManager(this.store, this.settings, storage);
 		const dispatcher: IWorkerDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher);
-		this.engine = new CoordinatorEngine(this.inboxId, this.store, this.settings, admission, dispatcher, this.logService);
+		// Reads a finished worker session's final message from the chat model, so
+		// `task_finished` produces real evidence with a connected host.
+		const resultReader = new TranscriptWorkerResultReader(instantiationService.createInstance(WorkbenchTranscriptSource));
+		this.engine = new CoordinatorEngine(this.inboxId, this.store, this.settings, admission, dispatcher, this.logService, undefined, resultReader);
 
 		this.ready = this.settings.initialize();
 
