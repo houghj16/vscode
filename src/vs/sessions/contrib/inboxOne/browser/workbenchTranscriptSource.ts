@@ -49,18 +49,32 @@ export class WorkbenchTranscriptSource implements ITranscriptSource {
 			this.logService.trace(`[inboxOne] transcript: no chat model for ${sessionRef}`);
 			return undefined;
 		}
-		// The emit-result block is in the last turn's response; scan from the end in
-		// case the final turn has no response yet.
+		// The worker emits the fenced `inbox-one-result` block and then usually
+		// calls a tool (e.g. task_complete), so the block is NOT in the "final
+		// response" (the markdown AFTER the last tool call). Read the WHOLE response
+		// markdown of each turn, and scan turns newest-first for the one that
+		// actually carries the block; a later turn may just be a summary. Fall back
+		// to the newest non-empty markdown so parsing still runs (and fails cleanly).
 		const requests = model.getRequests();
+		let newestNonEmpty: string | undefined;
 		for (let i = requests.length - 1; i >= 0; i--) {
 			const response = requests[i].response;
-			if (response) {
-				const text = response.entireResponse.getFinalResponse();
-				if (text && text.trim().length > 0) {
-					return text;
-				}
+			if (!response) {
+				continue;
+			}
+			const markdown = response.entireResponse.getMarkdown();
+			if (!markdown || markdown.trim().length === 0) {
+				continue;
+			}
+			if (newestNonEmpty === undefined) {
+				newestNonEmpty = markdown;
+			}
+			if (markdown.includes('```inbox-one-result')) {
+				this.logService.trace(`[inboxOne] transcript: result block found for ${sessionRef} in turn ${i}`);
+				return markdown;
 			}
 		}
-		return undefined;
+		this.logService.trace(`[inboxOne] transcript: no result block across ${requests.length} turn(s) for ${sessionRef}`);
+		return newestNonEmpty;
 	}
 }
