@@ -81,7 +81,8 @@ class FakeDispatcher implements IWorkerDispatcher {
 		if (this.defer) { return { sessionRef: `inboxone-pending://worker/${request.task.id}`, reused: false, deferred: true }; }
 		return { sessionRef: `session://worker/${request.task.id}`, reused: false };
 	}
-	async relay(sessionRef: string, message: string): Promise<void> { this.relays.push({ sessionRef, message }); }
+	async relay(sessionRef: string, message: string): Promise<boolean> { this.relays.push({ sessionRef, message }); return this.relayResult; }
+	relayResult = true;
 }
 
 class FakeResultReader implements IWorkerResultReader {

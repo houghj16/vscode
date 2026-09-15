@@ -79,10 +79,12 @@ export class SessionsManagementWorkerDispatcher implements IWorkerDispatcher {
 		return { sessionRef: session.resource.toString(), reused: false };
 	}
 
-	async relay(sessionRef: string, message: string): Promise<void> {
-		if (!await this.launcher.relay(sessionRef, message)) {
+	async relay(sessionRef: string, message: string): Promise<boolean> {
+		const delivered = await this.launcher.relay(sessionRef, message);
+		if (!delivered) {
 			this.logService.warn(`[inboxOne] relay target ${sessionRef} not found`);
 		}
+		return delivered;
 	}
 
 	/**

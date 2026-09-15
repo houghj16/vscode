@@ -26,7 +26,8 @@ export class StubWorkerDispatcher implements IWorkerDispatcher {
 		return { sessionRef, reused: !!request.reuseSessionRef };
 	}
 
-	async relay(sessionRef: string, message: string): Promise<void> {
+	async relay(sessionRef: string, message: string): Promise<boolean> {
 		this.logService.info(`[inboxOne] (stub) relay to ${sessionRef}: ${message.slice(0, 80)}`);
+		return true;
 	}
 }

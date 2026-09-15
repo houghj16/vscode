@@ -3,11 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { timeout } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IChatProgress } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { IChatSessionsService } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
+
+/** How many times to poll the transcript before giving up on the marker. */
+const DEFAULT_MAX_ATTEMPTS = 6;
+/** Delay between transcript polls (ms). */
+const DEFAULT_RETRY_DELAY_MS = 1500;
 
 /**
  * Reads a background agent session's transcript by resource and returns the
@@ -22,6 +28,12 @@ import { IChatSessionsService } from '../../../../workbench/contrib/chat/common/
  * precedes a trailing tool call (e.g. task_complete), and a later turn can be
  * just a summary, so we scan responses newest-first for the one that actually
  * carries the marker and fall back to the newest non-empty response.
+ *
+ * The read is polled with a short backoff: `getChatSessionHistory` returns the
+ * live in-memory model when a session is still resolved and only falls back to a
+ * fresh provider fetch once it is released, so at the exact turn-end edge the
+ * marker can lag by a beat. Polling a few times absorbs that race without any
+ * session-runtime coupling; the first attempt that sees the marker wins.
  */
 export async function readSessionResponseText(
 	chatSessions: IChatSessionsService,
@@ -36,37 +48,42 @@ export async function readSessionResponseText(
 		return undefined;
 	}
 
-	let history;
-	try {
-		history = await chatSessions.getChatSessionHistory(uri, CancellationToken.None);
-	} catch (err) {
-		logService.trace(`[inboxOne] transcript: history read failed for ${sessionRef}: ${err instanceof Error ? err.message : String(err)}`);
-		return undefined;
-	}
-	if (!history || history.length === 0) {
-		logService.trace(`[inboxOne] transcript: no history for ${sessionRef}`);
-		return undefined;
-	}
-
 	let newestNonEmpty: string | undefined;
-	for (let i = history.length - 1; i >= 0; i--) {
-		const item = history[i];
-		if (item.type !== 'response') {
+	let lastHistoryLen = 0;
+	for (let attempt = 0; attempt < DEFAULT_MAX_ATTEMPTS; attempt++) {
+		if (attempt > 0) {
+			await timeout(DEFAULT_RETRY_DELAY_MS);
+		}
+		let history;
+		try {
+			history = await chatSessions.getChatSessionHistory(uri, CancellationToken.None);
+		} catch (err) {
+			logService.trace(`[inboxOne] transcript: history read failed for ${sessionRef}: ${err instanceof Error ? err.message : String(err)}`);
 			continue;
 		}
-		const text = responseText(item.parts);
-		if (text.trim().length === 0) {
+		if (!history || history.length === 0) {
 			continue;
 		}
-		if (newestNonEmpty === undefined) {
-			newestNonEmpty = text;
-		}
-		if (text.includes(marker)) {
-			logService.trace(`[inboxOne] transcript: '${marker}' found for ${sessionRef} (len=${text.length})`);
-			return text;
+		lastHistoryLen = history.length;
+		for (let i = history.length - 1; i >= 0; i--) {
+			const item = history[i];
+			if (item.type !== 'response') {
+				continue;
+			}
+			const text = responseText(item.parts);
+			if (text.trim().length === 0) {
+				continue;
+			}
+			if (newestNonEmpty === undefined) {
+				newestNonEmpty = text;
+			}
+			if (text.includes(marker)) {
+				logService.info(`[inboxOne] transcript: '${marker}' found for ${sessionRef} on attempt ${attempt + 1} (len=${text.length})`);
+				return text;
+			}
 		}
 	}
-	logService.trace(`[inboxOne] transcript: '${marker}' not found across ${history.length} history item(s) for ${sessionRef}`);
+	logService.info(`[inboxOne] transcript: '${marker}' not found for ${sessionRef} after ${DEFAULT_MAX_ATTEMPTS} attempt(s) (history=${lastHistoryLen})`);
 	return newestNonEmpty;
 }
 

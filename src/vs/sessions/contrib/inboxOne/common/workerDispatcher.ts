@@ -27,9 +27,12 @@ export interface IWorkerDispatcher {
 
 	/**
 	 * Relays a steering/continuation message into an existing worker session
-	 * (technical spec 2.4). Used by the steer/reopen handoff.
+	 * (technical spec 2.4). Used by the steer/reopen handoff. Returns whether the
+	 * message was actually delivered (the session still exists and accepted it);
+	 * `false` means the target session is gone, so the caller must not assume the
+	 * worker was re-engaged.
 	 */
-	relay(sessionRef: string, message: string): Promise<void>;
+	relay(sessionRef: string, message: string): Promise<boolean>;
 }
 
 export interface IWorkerDispatchRequest {

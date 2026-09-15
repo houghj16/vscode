@@ -221,7 +221,14 @@ export class CoordinatorEngine {
 		}
 		this.finalizeRequested.add(key);
 		try {
-			await this.dispatcher.relay(sessionRef, WORKER_FINALIZE_PROMPT);
+			const delivered = await this.dispatcher.relay(sessionRef, WORKER_FINALIZE_PROMPT);
+			if (!delivered) {
+				// The worker session is gone, so there is nothing to finalize into;
+				// let the caller fail the attempt rather than wait for a turn that
+				// will never come.
+				this.finalizeRequested.delete(key);
+				return false;
+			}
 			this.logService.info(`[inboxOne] task ${task.id} asked to finalize its emit-result`);
 			return true;
 		} catch (err) {
