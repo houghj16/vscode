@@ -192,6 +192,23 @@ suite('Inbox One - coordinator engine', () => {
 		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Blocked);
 	});
 
+	test('a needs_input turn that already produced a valid result lands a decision, not a block', async () => {
+		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
+		const reader = new FakeResultReader();
+		reader.output = validOutput();
+		const engine = new CoordinatorEngine('my', store, new FakeSettings([{ repo: 'acme/api', active: true }]), new FakeAdmission(), new FakeDispatcher(), new NullLogService(), undefined, reader);
+
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		// Agent sessions end a turn as needs-input; if the result is already there, land it.
+		await engine.handleEvent({ deliveryId: 'ni2', source: EventSource.Session, sessionId, type: 'needs_input', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+
+		const landed = store.getTask(task.id)!;
+		assert.strictEqual(landed.state, LogicalTaskState.Decision, 'a turn with a valid result lands as a decision');
+		assert.strictEqual(landed.evidence!.decisionSentence, 'PR #842 is ready to approve');
+	});
+
 	test('a failed session event fails the owning attempt', async () => {
 		const { store, engine } = build();
 		await engine.handleEvent(prEvent());

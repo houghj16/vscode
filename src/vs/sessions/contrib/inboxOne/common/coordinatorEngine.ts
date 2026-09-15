@@ -125,12 +125,17 @@ export class CoordinatorEngine {
 				// evidence-bearing result; leave its inbox item for the human to clear.
 				if (task.type === 'conversation') {
 					this.logService.trace(`[inboxOne] conversation ${event.sessionId} finished`);
-				} else {
-					await this.landWorkerResult(task);
+				} else if (!await this.tryLandWorkerResult(task)) {
+					await this.store.transition(task.id, TaskTrigger.AttemptFailed);
 				}
 				break;
 			case 'needs_input':
-				await this.store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Worker needs input.' });
+				// Agent sessions end a TURN (status needs-input / waiting) rather than
+				// "complete". If the worker produced its emit-result this turn, land it;
+				// only when there is no result is it genuinely blocked on the human.
+				if (task.type !== 'conversation' && !await this.tryLandWorkerResult(task)) {
+					await this.store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Worker needs input.' });
+				}
 				break;
 			case 'failed':
 				await this.store.transition(task.id, TaskTrigger.AttemptFailed);
@@ -144,24 +149,22 @@ export class CoordinatorEngine {
 	}
 
 	/**
-	 * Turns a finished worker into a decision-ready result (technical spec 2.3):
-	 * read the worker's emitted result, HOST-validate it into an evidence pack,
-	 * HOST-compute the tier + plain-language rank reason from real signals, and
-	 * land it as a Decision. A missing or invalid result surfaces as a failed
-	 * attempt (a Retry decision), never a fabricated success. Nothing here is
+	 * Reads a worker's emitted result and, if it is a valid emit-result, HOST-
+	 * validates it into an evidence pack, HOST-computes the tier + plain-language
+	 * rank reason, and lands it as a Decision (technical spec 2.3). Returns whether
+	 * a decision was landed; `false` means no valid result yet (the caller decides
+	 * whether that is a failed attempt or a genuine block). Nothing here is
 	 * authored by the model except the raw candidate the host validates.
 	 */
-	private async landWorkerResult(task: ILogicalTask): Promise<void> {
+	private async tryLandWorkerResult(task: ILogicalTask): Promise<boolean> {
 		if (!this.resultReader) {
-			// No reader wired (e.g. pure-logic tests / no host); the lifecycle signal
-			// is recorded but evidence lands via another path.
-			this.logService.trace(`[inboxOne] worker finished for task ${task.id}; no result reader wired`);
-			return;
+			// No reader wired (e.g. pure-logic tests); the lifecycle signal is
+			// recorded but evidence lands via another path.
+			return false;
 		}
 		const sessionRef = currentAttempt(task)?.sessionRef;
 		if (!sessionRef) {
-			await this.store.transition(task.id, TaskTrigger.AttemptFailed);
-			return;
+			return false;
 		}
 
 		let output;
@@ -169,18 +172,16 @@ export class CoordinatorEngine {
 			output = await this.resultReader.read(task, sessionRef);
 		} catch (err) {
 			this.logService.error(`[inboxOne] reading worker result for task ${task.id} failed`, err);
-			output = undefined;
+			return false;
 		}
 		if (!output) {
-			await this.store.transition(task.id, TaskTrigger.AttemptFailed);
-			return;
+			return false;
 		}
 
 		const validated = validateWorkerResult(output.result);
 		if (!validated.ok) {
 			this.logService.warn(`[inboxOne] worker result for task ${task.id} rejected: ${validated.problems.join('; ')}`);
-			await this.store.transition(task.id, TaskTrigger.AttemptFailed);
-			return;
+			return false;
 		}
 
 		await this.store.setEvidence(task.id, validated.evidence);
@@ -191,6 +192,7 @@ export class CoordinatorEngine {
 			rankReason: ranked.reason,
 		});
 		this.logService.info(`[inboxOne] task ${task.id} landed as ${ranked.tier}: ${ranked.reason}`);
+		return true;
 	}
 
 	private async dispatchFor(task: ILogicalTask, role: WorkerRole, groupKey: GroupKey): Promise<void> {
