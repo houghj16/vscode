@@ -6,13 +6,14 @@
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { IChatSessionsService } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
-import { buildDistillerBrief, parseProposedSkill } from '../common/distillerBrief.js';
+import { buildDistillerBrief, DISTILLER_SKILL_FENCE, parseProposedSkill } from '../common/distillerBrief.js';
 import { IInboxOneFileStore, IStoredSkill } from '../common/inboxOneFileStore.js';
 import { IExperienceRecord, LearningTarget } from '../common/learningLoop.js';
 import { mapSessionStatusToEventType } from '../common/sessionEventMapping.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
+import { readSessionResponseText } from './sessionTranscriptReader.js';
 
 /** Reconstructs an on-disk SKILL.md (frontmatter + body) so the distiller sees the full skill. */
 function reconstructSkill(skill: IStoredSkill): string {
@@ -45,7 +46,7 @@ export class DistillerSessionDispatcher extends Disposable {
 	constructor(
 		@IInboxOneSessionLauncher private readonly launcher: IInboxOneSessionLauncher,
 		@IInboxOneFileStore private readonly fileStore: IInboxOneFileStore,
-		@IChatService private readonly chatService: IChatService,
+		@IChatSessionsService private readonly chatSessions: IChatSessionsService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
@@ -80,19 +81,7 @@ export class DistillerSessionDispatcher extends Disposable {
 	}
 
 	private async apply(session: ISession, skillId: string): Promise<void> {
-		const model = this.chatService.getSession(session.resource);
-		if (!model) {
-			return;
-		}
-		const requests = model.getRequests();
-		let text: string | undefined;
-		for (let i = requests.length - 1; i >= 0 && !text; i--) {
-			const response = requests[i].response;
-			const value = response?.entireResponse.getFinalResponse();
-			if (value && value.trim()) {
-				text = value;
-			}
-		}
+		const text = await readSessionResponseText(this.chatSessions, session.resource.toString(), '```' + DISTILLER_SKILL_FENCE, this.logService);
 		const proposed = text ? parseProposedSkill(text) : undefined;
 		if (!proposed) {
 			this.logService.trace(`[inboxOne] distiller proposed no change to ${skillId}`);
