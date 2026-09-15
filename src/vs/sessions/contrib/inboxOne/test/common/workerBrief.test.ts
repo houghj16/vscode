@@ -80,5 +80,7 @@ suite('Inbox One - workerBrief', () => {
 		assert.ok(/never mutate GitHub/i.test(WORKER_OPERATING_ENVELOPE));
 		assert.ok(/fully autonomously/i.test(WORKER_OPERATING_ENVELOPE));
 		assert.ok(/emit-result/i.test(WORKER_OPERATING_ENVELOPE));
+		assert.ok(/`gh` CLI/.test(WORKER_OPERATING_ENVELOPE), 'mandates the gh CLI for GitHub reads');
+		assert.ok(/web-fetch/i.test(WORKER_OPERATING_ENVELOPE), 'forbids a web-fetch/URL tool');
 	});
 });
