@@ -7,7 +7,7 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { WorkerRole } from '../../common/eventTaxonomy.js';
 import { EventSource, ILogicalTask, LogicalTaskState } from '../../common/inboxOneTypes.js';
-import { buildWorkerBrief, composeWorkerFirstMessage, WORKER_OPERATING_ENVELOPE } from '../../common/workerBrief.js';
+import { buildWorkerBrief, composeSteerRelay, composeWorkerFirstMessage, WORKER_OPERATING_ENVELOPE } from '../../common/workerBrief.js';
 
 function task(overrides: Partial<ILogicalTask> = {}): ILogicalTask {
 	return {
@@ -87,5 +87,12 @@ suite('Inbox One - workerBrief', () => {
 		assert.ok(/emit-result/i.test(WORKER_OPERATING_ENVELOPE));
 		assert.ok(/`gh` CLI/.test(WORKER_OPERATING_ENVELOPE), 'mandates the gh CLI for GitHub reads');
 		assert.ok(/web-fetch/i.test(WORKER_OPERATING_ENVELOPE), 'forbids a web-fetch/URL tool');
+	});
+
+	test('composeSteerRelay carries the instruction and demands a fresh result block', () => {
+		const relay = composeSteerRelay('  also consider the mobile Safari case  ');
+		assert.ok(relay.includes('also consider the mobile Safari case'), 'includes the human instruction (trimmed)');
+		assert.ok(relay.includes('inbox-one-result'), 'asks for a fresh emit-result block');
+		assert.ok(/fresh|new block/i.test(relay), 'insists on a new block so the card updates');
 	});
 });

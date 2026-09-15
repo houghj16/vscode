@@ -40,6 +40,8 @@ export async function readSessionResponseText(
 	sessionRef: string,
 	marker: string,
 	logService: ILogService,
+	maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
+	retryDelayMs: number = DEFAULT_RETRY_DELAY_MS,
 ): Promise<string | undefined> {
 	let uri: URI;
 	try {
@@ -50,9 +52,9 @@ export async function readSessionResponseText(
 
 	let newestNonEmpty: string | undefined;
 	let lastHistoryLen = 0;
-	for (let attempt = 0; attempt < DEFAULT_MAX_ATTEMPTS; attempt++) {
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
 		if (attempt > 0) {
-			await timeout(DEFAULT_RETRY_DELAY_MS);
+			await timeout(retryDelayMs);
 		}
 		let history;
 		try {
@@ -65,7 +67,19 @@ export async function readSessionResponseText(
 			continue;
 		}
 		lastHistoryLen = history.length;
+		// Only consider the CURRENT turn's output: responses after the last request
+		// (the most recent brief / steer / finalize prompt). This prevents re-landing
+		// a stale block from an earlier turn -- e.g. after a steer whose reply had no
+		// fresh block, so the caller then asks the worker to finalize a new one.
+		let lastRequestIdx = -1;
 		for (let i = history.length - 1; i >= 0; i--) {
+			if (history[i].type === 'request') {
+				lastRequestIdx = i;
+				break;
+			}
+		}
+		let turnNewest: string | undefined;
+		for (let i = history.length - 1; i > lastRequestIdx; i--) {
 			const item = history[i];
 			if (item.type !== 'response') {
 				continue;
@@ -74,16 +88,19 @@ export async function readSessionResponseText(
 			if (text.trim().length === 0) {
 				continue;
 			}
-			if (newestNonEmpty === undefined) {
-				newestNonEmpty = text;
+			if (turnNewest === undefined) {
+				turnNewest = text;
 			}
 			if (text.includes(marker)) {
 				logService.info(`[inboxOne] transcript: '${marker}' found for ${sessionRef} on attempt ${attempt + 1} (len=${text.length})`);
 				return text;
 			}
 		}
+		if (turnNewest !== undefined) {
+			newestNonEmpty = turnNewest;
+		}
 	}
-	logService.info(`[inboxOne] transcript: '${marker}' not found for ${sessionRef} after ${DEFAULT_MAX_ATTEMPTS} attempt(s) (history=${lastHistoryLen})`);
+	logService.info(`[inboxOne] transcript: '${marker}' not found for ${sessionRef} after ${maxAttempts} attempt(s) (history=${lastHistoryLen})`);
 	return newestNonEmpty;
 }
 

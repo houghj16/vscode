@@ -60,6 +60,22 @@ export const WORKER_FINALIZE_PROMPT = [
 	'Only include action_type/payload/label when a single catalog action fully fits and you can populate its entire required payload from what you verified; otherwise omit them and put your recommendation or the blocker (with the single recovery step) in decisionSentence -- an evidence-only result is valid. Output the block as the last thing in your message.',
 ].join('\n');
 
+/**
+ * Wraps a human's steer/reopen instruction before it is relayed into the warm
+ * worker session (technical spec 2.4). A worker often answers a steer in prose
+ * without re-emitting its result, so the inbox would re-land the STALE previous
+ * block and look like the steer was ignored. This appends an explicit instruction
+ * to end the turn with a FRESH emit-result block, so the card always reflects the
+ * updated decision. The worker still authors the evidence.
+ */
+export function composeSteerRelay(instruction: string): string {
+	return [
+		instruction.trim(),
+		'',
+		'After addressing this, re-run the emit-result contract and END your reply with a single fresh `inbox-one-result` block reflecting your UPDATED decision (title, decisionSentence, claims with receipts, gapLine, and a typed action or customAsk per the contract). Always emit a new block -- even if your conclusion is unchanged -- so the inbox card updates with the new result.',
+	].join('\n');
+}
+
 /** Human-legible label for the event subject a worker is dispatched for. */
 function describeSubject(task: ILogicalTask): string {
 	const subject = task.sourceEvent.subject;

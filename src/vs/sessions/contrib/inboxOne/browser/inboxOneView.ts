@@ -19,6 +19,7 @@ import { IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
 import { ActionType, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { composeSteerRelay } from '../common/workerBrief.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 import { IInboxOneNavigator } from './inboxOneNavigator.js';
 
@@ -273,7 +274,10 @@ export class InboxOneView extends AbstractCustomView {
 		// stays owned by the task (Open works, and its next finish re-lands here).
 		const ref = task.attempts[task.currentAttempt]?.sessionRef;
 		const relayable = !!ref && !ref.startsWith('inboxone-pending:') && !ref.startsWith('inboxone-stub:');
-		const relayed = relayable ? await this.sessionLauncher.relay(ref!, message) : false;
+		// Relay the user's instruction plus an explicit "emit a fresh result" reminder,
+		// so the worker always re-emits an updated card instead of answering in prose
+		// (which would leave the stale previous block to be re-landed).
+		const relayed = relayable ? await this.sessionLauncher.relay(ref!, composeSteerRelay(message)) : false;
 		const res = await this.store.openContinuation(task.id, trigger, continuationKey, undefined, relayed ? { attemptSessionRef: ref } : undefined);
 		if (res.outcome === TransitionOutcome.Applied && !res.fencedNoop) {
 			this.selectedTaskId.set(task.id, undefined);
