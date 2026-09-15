@@ -289,25 +289,10 @@
 	margin-top: 16px;
 }
 
-.inbox-one-ref-chip {
-	display: inline-flex;
-	align-items: center;
+.inbox-one-steer-inline {
+	display: flex;
 	gap: 8px;
-	margin-top: 16px;
-	padding: 4px 10px;
-	border-radius: 4px;
-	background: var(--vscode-badge-background);
-	color: var(--vscode-badge-foreground);
-	font-size: 12px;
-}
-
-.inbox-one-ref-chip-remove {
-	cursor: pointer;
-	opacity: 0.8;
-}
-
-.inbox-one-ref-chip-remove:hover {
-	opacity: 1;
+	margin-top: 12px;
 }
 
 .inbox-one-diffy-input {

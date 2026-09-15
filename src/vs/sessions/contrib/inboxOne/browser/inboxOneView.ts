@@ -57,8 +57,10 @@ export class InboxOneView extends AbstractCustomView {
 	override readonly description: IObservable<string | undefined>;
 
 	private readonly selectedTaskId: ISettableObservable<string | undefined> = observableValue('inboxOneSelected', undefined);
-	/** A task referenced into the Diffy thread (steer/reopen), with the intent verb. */
-	private readonly diffyReference: ISettableObservable<{ readonly taskId: string; readonly intent: 'steer' | 'reopen' } | undefined> = observableValue('inboxOneDiffyRef', undefined);
+	/** The task whose inline steer/reopen composer is open in the detail pane, with the intent verb. */
+	private readonly inlineCompose: ISettableObservable<{ readonly taskId: string; readonly intent: 'steer' | 'reopen' } | undefined> = observableValue('inboxOneInlineCompose', undefined);
+	/** Draft text for the inline composer, kept off the observable so re-renders don't wipe it. */
+	private inlineComposeDraft = '';
 	private listEl: HTMLElement | undefined;
 	private detailEl: HTMLElement | undefined;
 	private confirmPanel: HTMLElement | undefined;
@@ -137,7 +139,7 @@ export class InboxOneView extends AbstractCustomView {
 			const tasks = this.store.tasks.read(reader);
 			const selected = this.selectedTaskId.read(reader);
 			const scope = this.scopeRepo.read(reader);
-			this.diffyReference.read(reader);
+			this.inlineCompose.read(reader);
 			this.renderScope(scopeEl, tasks, scope);
 			const scoped = scope ? tasks.filter(t => t.repo === scope) : tasks;
 			this.renderList(scoped, selected);
@@ -228,24 +230,11 @@ export class InboxOneView extends AbstractCustomView {
 		const skillsLink = brief.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.openSkills', 'Skills & roles')));
 		this._register(addClick(skillsLink, () => void this.commandService.executeCommand('inboxOne.showSkills')));
 
-		const reference = this.diffyReference.get();
-		const referencedTask = reference ? tasks.find(t => t.id === reference.taskId) : undefined;
 		const composer = detail.appendChild($('.inbox-one-diffy-composer-wrap'));
-		if (reference && referencedTask) {
-			const chip = composer.appendChild($('.inbox-one-ref-chip'));
-			chip.appendChild($('span.inbox-one-ref-chip-label', undefined, `\u27e6 ${this.listTitle(referencedTask)} \u27e7`));
-			const remove = chip.appendChild($('span.inbox-one-ref-chip-remove', undefined, '\u2715'));
-			this._register(addClick(remove, () => this.diffyReference.set(undefined, undefined)));
-		}
 		const composerRow = composer.appendChild($('.inbox-one-diffy-composer'));
 		const input = composerRow.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
 		input.type = 'text';
-		input.placeholder = reference
-			? (reference.intent === 'reopen' ? localize('inboxOne.reopenPrompt', 'Reopen this and ...') : localize('inboxOne.steerPrompt', "Here's how you can make it better..."))
-			: localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
-		if (reference?.intent === 'reopen') {
-			input.value = localize('inboxOne.reopenDraft', 'Reopen this and ');
-		}
+		input.placeholder = localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
 		const send = composerRow.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.send', 'Send')));
 		const submit = () => {
 			const text = input.value.trim();
@@ -253,12 +242,7 @@ export class InboxOneView extends AbstractCustomView {
 				return;
 			}
 			input.value = '';
-			if (reference && referencedTask) {
-				this.diffyReference.set(undefined, undefined);
-				void this.continueTask(referencedTask, reference.intent, text);
-			} else {
-				this.notificationService.info(localize('inboxOne.diffyReply', 'Diffy: {0}', this.diffyReply(text, decisions.length, cooking.length, repos.size)));
-			}
+			this.notificationService.info(localize('inboxOne.diffyReply', 'Diffy: {0}', this.diffyReply(text, decisions.length, cooking.length, repos.size)));
 		};
 		this._register(addClick(send, submit));
 		this._register(addKeydown(input, 'Enter', submit));
@@ -434,7 +418,7 @@ export class InboxOneView extends AbstractCustomView {
 			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.completedNote', 'Completed. History preserved.')));
 			const actions = detail.appendChild($('.inbox-one-detail-actions'));
 			const reopen = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.reopen', 'Reopen with Diffy')));
-			this._register(addClick(reopen, () => this.referenceIntoDiffy(task, 'reopen')));
+			this._register(addClick(reopen, () => this.openInlineComposer(task, 'reopen')));
 			const archive = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.archiveBtn', 'Archive')));
 			this._register(addClick(archive, () => this.dismiss(task)));
 		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
@@ -445,6 +429,42 @@ export class InboxOneView extends AbstractCustomView {
 			const cancel = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancelWork', 'Cancel work')));
 			this._register(addClick(cancel, () => this.cancelWork(task)));
 		}
+
+		this.renderInlineComposer(detail, task);
+	}
+
+	/**
+	 * The inline steer/reopen composer (design 3.4/3.6): opened in place under the item's
+	 * actions when the user clicks Steer or Reopen, so the item's evidence stays in view.
+	 * Diffy still mediates - `continueTask` relays the note into the warm worker session.
+	 */
+	private renderInlineComposer(detail: HTMLElement, task: ILogicalTask): void {
+		const open = this.inlineCompose.get();
+		if (!open || open.taskId !== task.id) {
+			return;
+		}
+		const wrap = detail.appendChild($('.inbox-one-steer-inline'));
+		const input = wrap.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
+		input.type = 'text';
+		input.placeholder = open.intent === 'reopen'
+			? localize('inboxOne.reopenPrompt', 'Reopen this and ...')
+			: localize('inboxOne.steerPrompt', "Here's how you can make it better...");
+		input.value = this.inlineComposeDraft;
+		this._register(addDisposableListener(input, 'input', () => { this.inlineComposeDraft = input.value; }));
+		const send = wrap.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.send', 'Send')));
+		const submit = () => {
+			const text = input.value.trim();
+			if (!text) {
+				return;
+			}
+			this.inlineComposeDraft = '';
+			this.inlineCompose.set(undefined, undefined);
+			void this.continueTask(task, open.intent, text);
+		};
+		this._register(addClick(send, submit));
+		this._register(addKeydown(input, 'Enter', submit));
+		input.focus();
+		input.setSelectionRange(input.value.length, input.value.length);
 	}
 
 	/**
@@ -473,6 +493,8 @@ export class InboxOneView extends AbstractCustomView {
 		this._register(addClick(steer, () => this.steer(task)));
 		const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
 		this._register(addClick(dismiss, () => this.dismiss(task)));
+
+		this.renderInlineComposer(detail, task);
 	}
 
 	/** Human supplied the blocker's fact/permission: retry (Blocked -> Cooking). */
@@ -538,15 +560,23 @@ export class InboxOneView extends AbstractCustomView {
 		});
 	}
 
-	/** Steer (design 3.4): item-initiated, Diffy-mediated -> open Diffy scoped to this item. */
+	/** Steer (design 3.4): item-initiated -> open an inline composer under the item's actions,
+	 * so the user keeps the item's evidence in view while writing the steer. */
 	private steer(task: ILogicalTask): void {
-		this.referenceIntoDiffy(task, 'steer');
+		this.openInlineComposer(task, 'steer');
 	}
 
-	/** The reference-into-Diffy transition (design 3.6): select Diffy with the item attached. */
-	private referenceIntoDiffy(task: ILogicalTask, intent: 'steer' | 'reopen'): void {
-		this.diffyReference.set({ taskId: task.id, intent }, undefined);
-		this.selectedTaskId.set(DIFFY_SELECTION, undefined);
+	/** Opens (or toggles closed) the inline steer/reopen composer for this item in place,
+	 * without leaving the item's detail. Diffy still mediates the relay in `continueTask`. */
+	private openInlineComposer(task: ILogicalTask, intent: 'steer' | 'reopen'): void {
+		const open = this.inlineCompose.get();
+		if (open && open.taskId === task.id && open.intent === intent) {
+			this.inlineCompose.set(undefined, undefined);
+			return;
+		}
+		this.inlineComposeDraft = '';
+		this.selectedTaskId.set(task.id, undefined);
+		this.inlineCompose.set({ taskId: task.id, intent }, undefined);
 	}
 
 	private async cancelWork(task: ILogicalTask): Promise<void> {
