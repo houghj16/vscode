@@ -7,6 +7,7 @@ import assert from 'assert';
 import { constObservable } from '../../../../../base/common/observable.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
+import { TestStorageService } from '../../../../../workbench/test/common/workbenchTestServices.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { ISession } from '../../../../services/sessions/common/session.js';
@@ -59,7 +60,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	function make(sessions: FakeSessions, localFolder: URI | undefined, recents: URI[]) {
-		return new InboxOneSessionLauncher(sessions.asService(), fakeRecents(recents), fakeWorkspace(localFolder), disposables.add(new NullLogService()));
+		return new InboxOneSessionLauncher(sessions.asService(), fakeRecents(recents), fakeWorkspace(localFolder), disposables.add(new TestStorageService()), disposables.add(new NullLogService()));
 	}
 
 	test('launches in the open workspace folder when it can host a session', async () => {

@@ -6,11 +6,18 @@
 import { URI } from '../../../../base/common/uri.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ChatPermissionLevel } from '../../../../workbench/contrib/chat/common/constants.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ICreateNewSessionOptions, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsRecentWorkspacesService } from '../../../services/sessions/browser/sessionsRecentWorkspacesService.js';
+
+/** Storage key for the durable set of session resources this launcher created. */
+const MANAGED_SESSIONS_KEY = 'inboxOne.managedSessions';
+/** Cap on retained managed refs (FIFO), enough to cover live + recently-completed inbox sessions. */
+const MANAGED_SESSIONS_CAP = 500;
+
 
 export const IInboxOneSessionLauncher = createDecorator<IInboxOneSessionLauncher>('inboxOneSessionLauncher');
 
@@ -63,9 +70,10 @@ export interface IInboxOneSessionLauncher {
 	 * Whether `sessionRef` names a session this launcher created -- i.e. an
 	 * inbox-internal ambient session (a dispatched worker or the learning
 	 * distiller), not a session a human started. Conversation triage uses this to
-	 * skip Diffy's own machinery so only genuine user chats are surfaced. Tracked
-	 * in-memory for the window's lifetime; dispatched workers additionally resolve
-	 * durably via their owning task, so this is only relied on for the distiller.
+	 * skip Diffy's own machinery so only genuine user chats are surfaced. The set
+	 * is persisted, so a window reload still recognizes an inbox session that
+	 * finishes after the reload (otherwise an orphaned worker/distiller session
+	 * would be mis-surfaced as a finished conversation).
 	 */
 	isManaged(sessionRef: string): boolean;
 }
@@ -74,15 +82,45 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 
 	declare readonly _serviceBrand: undefined;
 
-	/** Resources of sessions this launcher created (inbox-internal ambient sessions). */
-	private readonly managed = new Set<string>();
+	/** Resources of sessions this launcher created (inbox-internal ambient sessions). Durable so a window reload still recognizes them. */
+	private readonly managed: Set<string>;
 
 	constructor(
 		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
 		@ISessionsRecentWorkspacesService private readonly recentWorkspaces: ISessionsRecentWorkspacesService,
 		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
+		@IStorageService private readonly storageService: IStorageService,
 		@ILogService private readonly logService: ILogService,
-	) { }
+	) {
+		this.managed = new Set(this.loadManaged());
+	}
+
+	private loadManaged(): readonly string[] {
+		try {
+			const raw = this.storageService.get(MANAGED_SESSIONS_KEY, StorageScope.APPLICATION);
+			const parsed = raw ? JSON.parse(raw) : [];
+			return Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === 'string') : [];
+		} catch {
+			return [];
+		}
+	}
+
+	private rememberManaged(sessionRef: string): void {
+		if (this.managed.has(sessionRef)) {
+			return;
+		}
+		this.managed.add(sessionRef);
+		// FIFO-trim so the durable set stays bounded over the app's lifetime.
+		let refs = [...this.managed];
+		if (refs.length > MANAGED_SESSIONS_CAP) {
+			refs = refs.slice(refs.length - MANAGED_SESSIONS_CAP);
+			this.managed.clear();
+			for (const r of refs) {
+				this.managed.add(r);
+			}
+		}
+		this.storageService.store(MANAGED_SESSIONS_KEY, JSON.stringify(refs), StorageScope.APPLICATION, StorageTarget.MACHINE);
+	}
 
 	canLaunch(): boolean {
 		return !!this.resolveDefaultFolder() || this.sessions.isQuickChatTargetAvailable();
@@ -120,7 +158,7 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 				return undefined;
 			}
 			if (session) {
-				this.managed.add(session.resource.toString());
+				this.rememberManaged(session.resource.toString());
 				this.logService.info(`[inboxOne] launched ${options.activity} -> ${session.resource.toString()}`);
 			}
 			return session;
