@@ -14,7 +14,7 @@ import { EventSource, ILogicalTask, LogicalTaskState } from '../../common/inboxO
 import { parseWorkerResult } from '../../common/parseWorkerResult.js';
 import { IWorkerDispatcher, IWorkerDispatchRequest, IWorkerDispatchResult } from '../../common/workerDispatcher.js';
 import { ITranscriptSource } from '../../common/workerResult.js';
-import { CompositeTranscriptSource, FallbackWorkerDispatcher, isSimulatedRef, resolveDispatchWiring, simulateWorkerFinalMessage, SimulatedWorkerDispatcher, SimulatedWorkerRuntime } from '../../browser/simulatedWorkerDispatcher.js';
+import { CompositeTranscriptSource, FallbackWorkerDispatcher, isSimulatedRef, simulateWorkerFinalMessage, SimulatedWorkerDispatcher, SimulatedWorkerRuntime } from '../../browser/simulatedWorkerDispatcher.js';
 
 function task(kind: string, id: string, attachedTo?: { kind: 'pr' | 'branch'; id: string }): ILogicalTask {
 	return {
@@ -100,15 +100,5 @@ suite('Inbox One - simulated worker', () => {
 		const b: ITranscriptSource = { async readFinalMessage() { return 'from-b'; } };
 		const composite = new CompositeTranscriptSource([a, b]);
 		assert.strictEqual(await composite.readFinalMessage(task('pr', '1'), 'ref'), 'from-b');
-	});
-
-	test('resolveDispatchWiring: stable never simulates; dev simulates unless turned off', () => {
-		// Stable builds: always the real dispatcher with cloud fallback, never simulate.
-		assert.deepStrictEqual(resolveDispatchWiring(false, true), { useSimulator: false, allowCloudFallback: true });
-		assert.deepStrictEqual(resolveDispatchWiring(false, false), { useSimulator: false, allowCloudFallback: true });
-		// Dev default (simulate=true): simulator on, cloud fallback off (defer -> simulate).
-		assert.deepStrictEqual(resolveDispatchWiring(true, true), { useSimulator: true, allowCloudFallback: false });
-		// Dev with the setting off: simulator off, cloud fallback on (drive the real host).
-		assert.deepStrictEqual(resolveDispatchWiring(true, false), { useSimulator: false, allowCloudFallback: true });
 	});
 });

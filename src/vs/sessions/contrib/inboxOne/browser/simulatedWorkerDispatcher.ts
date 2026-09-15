@@ -24,29 +24,6 @@ export function isSimulatedRef(sessionRef: string): boolean {
 	return sessionRef.startsWith(`${SIMULATED_SCHEME}:`);
 }
 
-/** The dispatch wiring the coordinator should use, resolved from build quality + the simulate setting. */
-export interface IDispatchWiring {
-	/** Wire the in-window simulator as a fallback when the real dispatch defers. */
-	readonly useSimulator: boolean;
-	/** Let the real dispatcher target the repo as a cloud workspace when no local folder is open. */
-	readonly allowCloudFallback: boolean;
-}
-
-/**
- * Decides how the coordinator wires dispatch (technical spec 2.2). Stable builds
- * always use the real dispatcher with the cloud fallback and never simulate. Dev
- * builds simulate by default (fast, deterministic, host-free), but the user can
- * turn simulation off (`inboxOne.simulateWorkers: false`) to exercise the real
- * agent host / cloud path -- at which point the cloud fallback is re-enabled so a
- * connected host actually drives workers. Pure, so it is unit-testable.
- */
-export function resolveDispatchWiring(isDevBuild: boolean, simulate: boolean): IDispatchWiring {
-	const useSimulator = isDevBuild && simulate;
-	// The simulator owns the no-host case; when it is off, the real dispatcher may
-	// target the repo as a cloud workspace so a connected host can run the worker.
-	return { useSimulator, allowCloudFallback: !useSimulator };
-}
-
 /**
  * The in-window worker simulator (dev builds only, technical spec 2.3).
  *

@@ -19,7 +19,7 @@ import { IEventIngress } from '../common/eventIngress.js';
 import { IInboxOneFileStore } from '../common/inboxOneFileStore.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
-import { DiffyCoordinatorService, INBOX_ONE_SIMULATE_WORKERS_SETTING } from './diffyCoordinatorService.js';
+import { DiffyCoordinatorService } from './diffyCoordinatorService.js';
 import { EventIngress } from './eventIngress.js';
 import { INBOX_ONE_ACTIONS, INBOX_ONE_DEV_ACTIONS } from './inboxOneCommands.js';
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
@@ -171,13 +171,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			scope: ConfigurationScope.MACHINE,
 			tags: ['experimental', 'advanced'],
 			description: localize('inboxOne.enabled', "Enables Inbox One: an always-on coordinator (Diffy) that watches enrolled repositories, dispatches ambient worker sessions, and surfaces evidence-backed decisions in a single prioritized inbox."),
-		},
-		[INBOX_ONE_SIMULATE_WORKERS_SETTING]: {
-			type: 'boolean',
-			default: true,
-			scope: ConfigurationScope.MACHINE,
-			tags: ['experimental', 'advanced'],
-			description: localize('inboxOne.simulateWorkers', "Dev builds only: run in-window simulated workers when no agent host is connected, so the full coordinator loop is testable headless. Turn this off to drive the real agent host / cloud path instead (open a repo folder for the local host). Ignored in stable builds, which never simulate. Takes effect on window reload."),
 		},
 	},
 });
