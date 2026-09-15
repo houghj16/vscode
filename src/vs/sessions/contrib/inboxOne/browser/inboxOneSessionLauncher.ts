@@ -7,8 +7,9 @@ import { URI } from '../../../../base/common/uri.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { ChatPermissionLevel } from '../../../../workbench/contrib/chat/common/constants.js';
 import { ISession } from '../../../services/sessions/common/session.js';
-import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
+import { ICreateNewSessionOptions, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsRecentWorkspacesService } from '../../../services/sessions/browser/sessionsRecentWorkspacesService.js';
 
 export const IInboxOneSessionLauncher = createDecorator<IInboxOneSessionLauncher>('inboxOneSessionLauncher');
@@ -76,7 +77,15 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 
 	async launch(firstMessage: string, options: ILaunchOptions): Promise<ISession | undefined> {
 		const request = { query: firstMessage, title: options.title, background: true };
-		const createOptions = options.metadata ? { metadata: options.metadata } : undefined;
+		// Ambient inbox sessions run fully autonomously (no human at the keyboard),
+		// so they must not stall on tool-approval prompts: mount them at Autopilot
+		// (auto-approve every tool call, auto-retry, and keep going until the task
+		// is done). This is the same permission level Automations use for unattended
+		// runs -- no bespoke approval handling, just the standard session config.
+		const createOptions: ICreateNewSessionOptions = {
+			permissionLevel: ChatPermissionLevel.Autopilot,
+			...(options.metadata ? { metadata: options.metadata } : {}),
+		};
 		const folder = this.resolveDefaultFolder();
 		try {
 			let session: ISession | undefined;

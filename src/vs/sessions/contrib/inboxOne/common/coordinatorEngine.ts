@@ -128,17 +128,18 @@ export class CoordinatorEngine {
 				// evidence-bearing result; leave its inbox item for the human to clear.
 				if (task.type === 'conversation') {
 					this.logService.trace(`[inboxOne] conversation ${event.sessionId} finished`);
-				} else if (!await this.tryLandWorkerResult(task)) {
+				} else if (!await this.tryLandWorkerResult(task) && !await this.tryRequestFinalize(task)) {
+					// The worker went idle (turn/task complete) but emitted no parseable
+					// result: ask it once to finalize what it found into the emit-result
+					// block, and only fail the attempt if it still produces nothing.
 					await this.store.transition(task.id, TaskTrigger.AttemptFailed);
 				}
 				break;
 			case 'needs_input':
-				// Agent sessions end a TURN (status needs-input / waiting) rather than
-				// "complete". If the worker produced its emit-result this turn, land it.
-				// Otherwise the worker likely stopped at prose findings: ask it once to
-				// finalize into the emit-result block, and only block when it still
-				// produces nothing after that (or there is no session to relay to).
-				if (task.type !== 'conversation' && !await this.tryLandWorkerResult(task) && !await this.tryRequestFinalize(task)) {
+				// The worker is blocked waiting on a human (autopilot auto-approves
+				// tools, so this is a genuine ask, not a routine tool pause). Land a
+				// result if one is already present, else surface the recovery step.
+				if (task.type !== 'conversation' && !await this.tryLandWorkerResult(task)) {
 					await this.store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Worker needs input.' });
 				}
 				break;

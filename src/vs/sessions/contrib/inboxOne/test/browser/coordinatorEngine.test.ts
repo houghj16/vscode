@@ -182,23 +182,33 @@ suite('Inbox One - coordinator engine', () => {
 		assert.ok(task.attempts[0].sessionRef?.startsWith('inboxone-pending://'), 'pending ref recorded');
 	});
 
-	test('a needs_input turn with no result asks the worker to finalize once, then blocks', async () => {
+	test('a needs_input session event blocks the owning task (genuine ask for the human)', async () => {
+		const { store, dispatcher, engine } = build();
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
+		await engine.handleEvent({ deliveryId: 'se1', source: EventSource.Session, sessionId, type: 'needs_input', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Blocked);
+		assert.strictEqual(dispatcher.relays.length, 0, 'needs_input is a human ask, not a finalize trigger');
+	});
+
+	test('a task_finished with no result asks the worker to finalize once, then fails', async () => {
 		const { store, dispatcher, engine } = build();
 		await engine.handleEvent(prEvent());
 		const task = store.tasks.get()[0];
 		const sessionRef = task.attempts[0].sessionRef!;
 		const sessionId = sessionRef.replace('session://worker/', '');
-		const needsInput = { deliveryId: 'se1', source: EventSource.Session, sessionId, type: 'needs_input' as const, subject: { kind: 'session' as const, id: sessionId }, receivedAt: 0 };
+		const finished = { deliveryId: 'tf1', source: EventSource.Session, sessionId, type: 'task_finished' as const, subject: { kind: 'session' as const, id: sessionId }, receivedAt: 0 };
 
-		// First turn-end without a result: ask the worker to finalize (stay Cooking).
-		await engine.handleEvent(needsInput);
+		// First idle turn without a result: ask the worker to finalize (stay Cooking).
+		await engine.handleEvent(finished);
 		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Cooking, 'stays cooking after a finalize request');
 		assert.strictEqual(dispatcher.relays.length, 1, 'a single finalize relay was sent');
 		assert.ok(dispatcher.relays[0].message.includes('inbox-one-result'), 'the finalize relay asks for the result block');
 
-		// Still no result after finalize: now it is genuinely blocked on the human.
-		await engine.handleEvent({ ...needsInput, deliveryId: 'se1b' });
-		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Blocked);
+		// Still nothing after finalize: fail the attempt (surfaced as a Decision).
+		await engine.handleEvent({ ...finished, deliveryId: 'tf1b' });
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Decision);
 		assert.strictEqual(dispatcher.relays.length, 1, 'finalize is not relayed twice for one attempt');
 	});
 
@@ -256,7 +266,7 @@ suite('Inbox One - coordinator engine', () => {
 		assert.strictEqual(reader.reads.length, 1, 'the worker result was read once');
 	});
 
-	test('an invalid worker result fails the attempt instead of fabricating a decision', async () => {
+	test('an invalid worker result, after a finalize retry, fails the attempt instead of fabricating a decision', async () => {
 		const store = disposables.add(new InboxOneStore(new InMemoryCasStorage()));
 		const reader = new FakeResultReader();
 		reader.output = { result: { decisionSentence: '', claims: [], gapLine: '' }, signals: {} }; // missing mandatory evidence
@@ -265,7 +275,12 @@ suite('Inbox One - coordinator engine', () => {
 		await engine.handleEvent(prEvent());
 		const task = store.tasks.get()[0];
 		const sessionId = task.attempts[0].sessionRef!.replace('session://worker/', '');
-		await engine.handleEvent({ deliveryId: 'sf2', source: EventSource.Session, sessionId, type: 'task_finished', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+		const finished = { deliveryId: 'sf2', source: EventSource.Session, sessionId, type: 'task_finished' as const, subject: { kind: 'session' as const, id: sessionId }, receivedAt: 0 };
+		// First idle turn: the invalid result triggers one finalize retry (stay Cooking).
+		await engine.handleEvent(finished);
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Cooking);
+		// Still invalid after the retry: fail the attempt.
+		await engine.handleEvent({ ...finished, deliveryId: 'sf2b' });
 
 		const landed = store.getTask(task.id)!;
 		// A failed attempt surfaces as a Decision + Retry, never a fabricated success.
