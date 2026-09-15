@@ -36,17 +36,21 @@ export class InboxOneFileStore extends Disposable implements IInboxOneFileStore 
 	private readonly patternsRoot: URI;
 	private readonly experienceRoot: URI;
 	private readonly historyRoot: URI;
+	/** The harness skill-discovery directory (e.g. ~/.copilot/skills) to project skills into, or undefined to skip. */
+	private readonly discoveryRoot: URI | undefined;
 
 	private readonly _roleList: ISettableObservable<ReadonlyMap<string, readonly string[]>>;
 	private _initialized: Promise<void> | undefined;
 
 	constructor(
 		root: URI,
+		discoveryRoot: URI | undefined,
 		@IFileService private readonly fileService: IFileService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 		this.root = root;
+		this.discoveryRoot = discoveryRoot;
 		this.skillsRoot = joinPath(root, 'skills');
 		this.wikiRoot = joinPath(root, 'wiki');
 		this.patternsRoot = joinPath(this.wikiRoot, 'patterns');
@@ -93,7 +97,35 @@ export class InboxOneFileStore extends Disposable implements IInboxOneFileStore 
 			}
 		}
 		await this.regenerateRoleList();
+		await this.projectSkillsForDiscovery();
 		this.logService.trace(`[inboxOne] file store initialized at ${this.root.toString()}`);
+	}
+
+	/**
+	 * Projects the worker-facing ROLE skills (not the framework contract, which is
+	 * inlined, nor coordinator skills) into the harness skill-discovery directory
+	 * ({@link discoveryRoot}, e.g. ~/.copilot/skills) as `inbox-one-<id>/SKILL.md`,
+	 * so the agent host attaches them to worker sessions through its native Skills
+	 * integration (the worker references them by name; the first message no longer
+	 * inlines their bodies). Best-effort: a failure (e.g. a web host with no writable
+	 * home) is logged and skipped, and the brief still carries the self-contained
+	 * work item.
+	 */
+	private async projectSkillsForDiscovery(): Promise<void> {
+		if (!this.discoveryRoot) {
+			return;
+		}
+		try {
+			const skills = (await this.readAllSkills()).filter(s => !s.isCoordinator && !s.isFramework);
+			for (const skill of skills) {
+				const target = joinPath(this.discoveryRoot, `inbox-one-${skill.frontmatter.id}`, 'SKILL.md');
+				await this.ensureDir(dirOf(target));
+				await this.writeText(target, await this.readText(joinPath(this.skillsRoot, skill.path)));
+			}
+			this.logService.trace(`[inboxOne] projected ${skills.length} skill(s) into ${this.discoveryRoot.toString()}`);
+		} catch (err) {
+			this.logService.warn(`[inboxOne] skill discovery projection skipped: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 
 	// --- skills ---
@@ -125,6 +157,7 @@ export class InboxOneFileStore extends Disposable implements IInboxOneFileStore 
 		await this.ensureDir(dirOf(target));
 		await this.writeText(target, content);
 		await this.regenerateRoleList();
+		await this.projectSkillsForDiscovery();
 	}
 
 	async rollbackSkill(id: string, toVersion: number): Promise<void> {

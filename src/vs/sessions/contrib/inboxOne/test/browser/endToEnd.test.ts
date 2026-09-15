@@ -70,7 +70,7 @@ suite('Inbox One - end-to-end scenario', () => {
 
 		const fileService = disposables.add(new FileService(new NullLogService()));
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
-		const fileStore = disposables.add(new InboxOneFileStore(FS_ROOT, fileService, new NullLogService()));
+		const fileStore = disposables.add(new InboxOneFileStore(FS_ROOT, undefined, fileService, new NullLogService()));
 		await fileStore.initialize();
 		const learning = new LearningOrchestrator(fileStore, new InMemoryCasStorage(), new NullLogService());
 

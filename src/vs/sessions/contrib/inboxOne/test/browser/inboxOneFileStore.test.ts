@@ -21,7 +21,7 @@ suite('Inbox One - file-backed store', () => {
 	async function createStore(): Promise<InboxOneFileStore> {
 		const fileService = disposables.add(new FileService(new NullLogService()));
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
-		const store = disposables.add(new InboxOneFileStore(ROOT, fileService, new NullLogService()));
+		const store = disposables.add(new InboxOneFileStore(ROOT, undefined, fileService, new NullLogService()));
 		await store.initialize();
 		return store;
 	}

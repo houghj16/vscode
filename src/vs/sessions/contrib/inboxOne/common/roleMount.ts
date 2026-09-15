@@ -8,14 +8,19 @@ import { IParsedSkill } from './skillModel.js';
 /**
  * Role mounting / persona composition (design 5.2, technical spec 2.2 step 3).
  *
- * `mount_roles([...])` reads every skill tagged with the requested roles,
- * concatenates their bodies (plus any wiki patterns tagged for them), and returns
- * the composed persona context. Deterministic; the harness -- not the model --
- * attaches the skills. The worker's baked-in framework skills are mounted
- * unconditionally and are NOT governed by role selection (design 5.1).
+ * `mount_roles([...])` selects the skills tagged with the requested roles and
+ * composes the worker persona. Role skills are ATTACHED to the session through
+ * the harness Skills integration (directory discovery), so this references them
+ * by name + purpose rather than inlining their full bodies -- the worker loads a
+ * skill's methodology on demand by name, and the first message stays small as
+ * skills accumulate. Learned wiki patterns (not discoverable skills) and the
+ * small, mandatory framework output contract are inlined in full. Deterministic;
+ * the harness -- not the model -- selects/attaches the skills. Framework skills
+ * are mounted unconditionally, independent of role selection (design 5.1).
  *
  * This module is the pure composition core; the file-backed store supplies the
- * parsed skills and wiki patterns.
+ * parsed skills and wiki patterns and projects the role skills into the harness
+ * discovery directory.
  */
 
 export interface IWikiPatternSnippet {
@@ -59,9 +64,18 @@ export function mountRoles(roleNames: readonly string[], skills: readonly IParse
 	const sections: string[] = [];
 	const skillIds: string[] = [];
 
-	for (const skill of selected) {
-		sections.push(renderSkillSection(skill));
-		skillIds.push(skill.frontmatter.id);
+	// Role skills are ATTACHED to the worker session through the harness Skills
+	// integration (discovered from the skills directory), so reference them by name
+	// and purpose here instead of inlining their full bodies -- the worker loads a
+	// skill's full methodology on demand by name. This keeps the first message from
+	// ballooning as skills accumulate; only the (small, mandatory) framework output
+	// contract below is inlined in full.
+	if (selected.length) {
+		const refs = selected.map(s => `- ${s.frontmatter.id}: ${skillPurpose(s.body)}`).join('\n');
+		sections.push(`## Your mounted skills\nThese role skills are attached to your session; consult them by name for methodology:\n${refs}`);
+		for (const skill of selected) {
+			skillIds.push(skill.frontmatter.id);
+		}
 	}
 
 	if (patterns.length) {
@@ -69,8 +83,9 @@ export function mountRoles(roleNames: readonly string[], skills: readonly IParse
 		sections.push(`## Learned patterns\n${patternText}`);
 	}
 
-	// Framework skills are mounted last so their output contract is the final,
-	// authoritative instruction the worker reads (design 5.1 / 2.3).
+	// The framework output contract is inlined in full (small, authoritative, and
+	// followed exactly), mounted last so it is the final instruction the worker
+	// reads (design 5.1 / 2.3).
 	for (const skill of framework) {
 		sections.push(renderSkillSection(skill));
 		skillIds.push(skill.frontmatter.id);
@@ -81,6 +96,18 @@ export function mountRoles(roleNames: readonly string[], skills: readonly IParse
 		skillIds,
 		patternIds: patterns.map(p => p.id),
 	};
+}
+
+/** The first meaningful line of a skill body (its heading), used as a one-line reference purpose. */
+function skillPurpose(body: string): string {
+	for (const raw of body.split('\n')) {
+		const line = raw.trim();
+		if (line.length === 0) {
+			continue;
+		}
+		return line.startsWith('# ') ? line.slice(2).trim() : line;
+	}
+	return '';
 }
 
 function renderSkillSection(skill: IParsedSkill): string {

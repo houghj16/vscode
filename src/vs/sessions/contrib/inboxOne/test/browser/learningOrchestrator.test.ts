@@ -13,9 +13,8 @@ import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { IAutomationStorageCompareAndSwapResult, IAutomationStorageService } from '../../../automations/common/automationStorageService.js';
 import { InboxOneFileStore } from '../../browser/inboxOneFileStore.js';
 import { LearningOrchestrator } from '../../browser/learningOrchestrator.js';
-import { IExperienceRecord } from '../../common/learningLoop.js';
+import { IExperienceRecord, parseSkillImpact } from '../../common/learningLoop.js';
 import { GestureKind } from '../../common/inboxOneTypes.js';
-import { parseSkillImpact } from '../../common/learningLoop.js';
 
 class InMemoryCasStorage implements IAutomationStorageService {
 	declare readonly _serviceBrand: undefined;
@@ -41,7 +40,7 @@ suite('Inbox One - learning orchestrator', () => {
 	async function setup() {
 		const fileService = disposables.add(new FileService(new NullLogService()));
 		disposables.add(fileService.registerProvider(Schemas.inMemory, disposables.add(new InMemoryFileSystemProvider())));
-		const store = disposables.add(new InboxOneFileStore(ROOT, fileService, new NullLogService()));
+		const store = disposables.add(new InboxOneFileStore(ROOT, undefined, fileService, new NullLogService()));
 		await store.initialize();
 		const storage = new InMemoryCasStorage();
 		const orchestrator = new LearningOrchestrator(store, storage, new NullLogService());
