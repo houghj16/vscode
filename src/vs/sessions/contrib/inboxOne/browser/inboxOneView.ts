@@ -218,7 +218,7 @@ export class InboxOneView extends AbstractCustomView {
 		const autoHandled = tasks.filter(t => t.tier === InboxOneTier.Fyi && t.state === LogicalTaskState.Completed);
 
 		const brief = detail.appendChild($('.inbox-one-diffy-brief'));
-		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefNeed', '{0} need you: {1}', decisions.length, decisions.map(t => t.evidence?.decisionSentence ?? t.type).join('; ') || '-')));
+		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefNeed', '{0} need you', decisions.length)));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefCooking', '{0} cooking', cooking.length)));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefAuto', '{0} auto-handled and logged', autoHandled.length)));
 
@@ -233,7 +233,7 @@ export class InboxOneView extends AbstractCustomView {
 		const composer = detail.appendChild($('.inbox-one-diffy-composer-wrap'));
 		if (reference && referencedTask) {
 			const chip = composer.appendChild($('.inbox-one-ref-chip'));
-			chip.appendChild($('span.inbox-one-ref-chip-label', undefined, `\u27e6 ${referencedTask.evidence?.decisionSentence ?? referencedTask.type} \u27e7`));
+			chip.appendChild($('span.inbox-one-ref-chip-label', undefined, `\u27e6 ${this.listTitle(referencedTask)} \u27e7`));
 			const remove = chip.appendChild($('span.inbox-one-ref-chip-remove', undefined, '\u2715'));
 			this._register(addClick(remove, () => this.diffyReference.set(undefined, undefined)));
 		}

@@ -82,13 +82,14 @@ export class NotificationOrchestrator extends Disposable {
 	}
 
 	private fire(task: ILogicalTask): void {
-		const headline = task.evidence?.decisionSentence ?? this.fallbackTitle(task);
+		const title = task.evidence?.title?.trim() || this.fallbackTitle(task);
 		const severity = task.tier === InboxOneTier.Critical ? Severity.Error : Severity.Warning;
-		const scope = task.repo ? localize('inboxOne.notify.scope', '{0} - {1}', task.repo, headline) : headline;
+		// Minimal, collapsed push text: the urgency prefix plus the short title.
+		const message = localize('inboxOne.notify.message', '{0}: {1}', this.tierLabel(task.tier), title);
 
 		this.notificationService.prompt(
 			severity,
-			scope,
+			message,
 			[{
 				label: localize('inboxOne.notify.open', 'Open'),
 				run: () => {
@@ -99,6 +100,14 @@ export class NotificationOrchestrator extends Disposable {
 			}],
 			{ sticky: task.tier === InboxOneTier.Critical },
 		);
+	}
+
+	private tierLabel(tier: InboxOneTier | undefined): string {
+		switch (tier) {
+			case InboxOneTier.Critical: return localize('inboxOne.notify.critical', 'Critical');
+			case InboxOneTier.Urgent: return localize('inboxOne.notify.urgent', 'Urgent');
+			default: return localize('inboxOne.notify.fyi', 'FYI');
+		}
 	}
 
 	private fallbackTitle(task: ILogicalTask): string {
