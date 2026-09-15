@@ -6,7 +6,7 @@
 import { IAutomationStorageService } from '../../automations/common/automationStorageService.js';
 import { AdmissionResult, canAdmit as canAdmitPure, dayKey, EMPTY_ADMISSION_STATE, IAdmissionState, reserve as reservePure } from '../common/admissionControl.js';
 import { IAdmissionManager } from '../common/coordinatorEngine.js';
-import { IInboxOneStore } from '../common/inboxOneStore.js';
+import { hasLiveWorker, IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { LogicalTaskState } from '../common/inboxOneTypes.js';
 
@@ -78,7 +78,11 @@ export class LiveAdmissionManager implements IAdmissionManager {
 	private liveAttempts(): { id: string; repo?: string }[] {
 		const out: { id: string; repo?: string }[] = [];
 		for (const task of this.store.tasks.get()) {
-			if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
+			// Only tasks with a live, dispatched worker occupy a concurrency slot.
+			// A queued Cooking task (no worker yet) must not count, or the slot budget
+			// deadlocks and queued tasks hang forever (the task being dispatched would
+			// even block itself).
+			if ((task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) && hasLiveWorker(task)) {
 				out.push({ id: task.id, repo: task.repo });
 			}
 		}

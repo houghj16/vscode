@@ -59,10 +59,13 @@ class FakeSettings implements IInboxOneSettings {
 
 class FakeAdmission implements IAdmissionManager {
 	admit = true;
+	/** tryReserve outcome when the gate admits (e.g. daily-credit availability). */
+	reserveOk = true;
 	reserved: string[] = [];
 	released: string[] = [];
 	async tryReserve(taskId: string, attemptIndex: number): Promise<AdmissionResult> {
 		if (!this.admit) { return AdmissionResult.QueuedGlobalConcurrency; }
+		if (!this.reserveOk) { return AdmissionResult.QueuedDailyCredits; }
 		this.reserved.push(`${taskId}:${attemptIndex}`);
 		return AdmissionResult.Admitted;
 	}
@@ -181,6 +184,25 @@ suite('Inbox One - coordinator engine', () => {
 		// ...but the task stays Cooking (recorded intent), not failed.
 		assert.strictEqual(task.state, LogicalTaskState.Cooking);
 		assert.ok(task.attempts[0].sessionRef?.startsWith('inboxone-pending://'), 'pending ref recorded');
+	});
+
+	test('a task queued by admission is dispatched once a slot frees (never hangs)', async () => {
+		const { store, dispatcher, admission, engine } = build();
+		// The gate admits (a slot looks free) so the task is created, but the reserve
+		// queues it (e.g. daily credits) so no worker starts -- an admission-queued task.
+		admission.reserveOk = false;
+		await engine.handleEvent(prEvent());
+		const task = store.tasks.get()[0];
+		assert.strictEqual(task.state, LogicalTaskState.Cooking);
+		assert.strictEqual(task.attempts[0].sessionRef, undefined, 'queued: no worker started yet');
+		assert.strictEqual(dispatcher.dispatched.length, 0, 'nothing dispatched while queued');
+
+		// Capacity frees; the next event pumps the queue and the task finally dispatches.
+		admission.reserveOk = true;
+		await engine.handleEvent({ deliveryId: 'noop', source: EventSource.Session, sessionId: 'nobody', type: 'idle', subject: { kind: 'session', id: 'nobody' }, receivedAt: 0 });
+
+		assert.strictEqual(dispatcher.dispatched.length, 1, 'the queued task dispatched when capacity freed');
+		assert.ok(store.getTask(task.id)!.attempts[0].sessionRef?.startsWith('session://worker/'), 'now has a live worker');
 	});
 
 	test('a needs_input session event blocks the owning task (genuine ask for the human)', async () => {

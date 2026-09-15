@@ -146,6 +146,18 @@ export function currentAttempt(task: ILogicalTask): IAttempt | undefined {
 	return task.attempts[task.currentAttempt];
 }
 
+/**
+ * Whether the task's current attempt is backed by a live, dispatched worker
+ * session -- i.e. it holds a real concurrency slot. A queued attempt (no ref
+ * yet), a deferred dispatch (`inboxone-pending:`), or a stubbed one
+ * (`inboxone-stub:`) has no live worker, so it must NOT count toward concurrency
+ * (otherwise queued tasks deadlock the slot budget and never get a worker).
+ */
+export function hasLiveWorker(task: ILogicalTask): boolean {
+	const ref = currentAttempt(task)?.sessionRef;
+	return !!ref && !ref.startsWith('inboxone-pending:') && !ref.startsWith('inboxone-stub:');
+}
+
 /** Convenience: whether the task is currently in one of the given states. */
 export function taskInState(task: ILogicalTask, ...states: LogicalTaskState[]): boolean {
 	return states.includes(task.state);

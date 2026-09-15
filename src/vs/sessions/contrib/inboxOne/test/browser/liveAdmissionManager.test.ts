@@ -65,11 +65,13 @@ suite('Inbox One - LiveAdmissionManager', () => {
 		return { store, settings, mgr };
 	}
 
-	/** Create N live (Cooking) tasks in a repo. */
+	/** Create N live (Cooking, dispatched-worker) tasks in a repo. */
 	async function seedLiveTasks(store: InboxOneStore, repo: string, count: number): Promise<string[]> {
 		const ids: string[] = [];
 		for (let i = 0; i < count; i++) {
 			const { task } = await store.upsertByGroupKey({ inboxId: 'my', repo, groupKey: `${repo}:pr:${i}`, sourceEvent: ev(repo, String(i), `d${repo}${i}`), type: 'code-review', firstAttemptTrigger: AttemptTrigger.Hook });
+			// A live task holds a concurrency slot only once it has a dispatched worker.
+			await store.updateTask(task.id, { sessionRef: `agent-host://worker/${task.id}` });
 			ids.push(task.id);
 		}
 		return ids;

@@ -115,34 +115,43 @@ suite('Inbox One - emit-result validation', () => {
 		}
 	});
 
-	test('rejects an out-of-catalog action type', () => {
+	test('degrades an out-of-catalog action to a custom ask (Steer)', () => {
 		const result = validateWorkerResult(baseEvidence({ actionType: 'delete_repo', payload: {}, label: 'Nuke' }));
-		assert.strictEqual(result.ok, false);
-		if (!result.ok) {
-			assert.ok(result.problems.some(p => p.includes('unknown action_type')));
+		assert.strictEqual(result.ok, true);
+		if (result.ok) {
+			assert.strictEqual(result.evidence.primaryAction, undefined, 'no typed action for an out-of-catalog type');
+			assert.ok(result.evidence.customAsk && result.evidence.customAsk.includes('Nuke'), 'surfaces the model suggestion for Steer');
 		}
 	});
 
-	test('rejects a malformed action payload', () => {
+	test('degrades a malformed action payload to a custom ask (Steer)', () => {
 		const result = validateWorkerResult(baseEvidence({ actionType: ActionType.MergePr, payload: { repo: 'acme/api' }, label: 'Merge' }));
-		assert.strictEqual(result.ok, false);
+		assert.strictEqual(result.ok, true);
+		if (result.ok) {
+			assert.strictEqual(result.evidence.primaryAction, undefined, 'a malformed payload never becomes a one-click action');
+			assert.ok(result.evidence.customAsk, 'presents a Steerable ask instead of failing the whole result');
+		}
 	});
 
-	test('rejects a label longer than the word limit', () => {
+	test('cleans an over-long label on a valid action instead of failing', () => {
 		const result = validateWorkerResult(baseEvidence({
 			actionType: ActionType.ApprovePr,
 			payload: { repo: 'acme/api', prNumber: 1 },
 			label: 'this label is definitely too long',
 		}));
-		assert.strictEqual(result.ok, false);
-		if (!result.ok) {
-			assert.ok(result.problems.some(p => p.includes('label must be at most')));
+		assert.strictEqual(result.ok, true);
+		if (result.ok) {
+			assert.ok(result.evidence.primaryAction, 'a valid action still lands');
+			assert.ok(result.evidence.primaryAction!.label.split(/\s+/).length <= 4, 'label trimmed to the word limit');
 		}
 	});
 
-	test('rejects an action proposed without a label', () => {
+	test('fills a default label when a valid action has none', () => {
 		const result = validateWorkerResult(baseEvidence({ actionType: ActionType.ApprovePr, payload: { repo: 'r', prNumber: 1 } }));
-		assert.strictEqual(result.ok, false);
+		assert.strictEqual(result.ok, true);
+		if (result.ok) {
+			assert.strictEqual(result.evidence.primaryAction!.label, 'Approve Pr', 'humanized from the action type');
+		}
 	});
 
 	test('host-authoritative rung: invalid rung defaults to illustrative', () => {

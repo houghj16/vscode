@@ -59,10 +59,6 @@ export interface IEmitResultRejected {
 
 export type IEmitResultOutcome = IEmitResultAccepted | IEmitResultRejected;
 
-function countWords(s: string): number {
-	return s.trim().split(/\s+/).filter(Boolean).length;
-}
-
 function coerceRung(rung: number | undefined): EvidenceRung {
 	// The rung is host-authoritative; a model-supplied number is clamped to a
 	// known rung and defaults to the lowest (illustrative) when absent/invalid.
@@ -100,29 +96,31 @@ export function validateWorkerResult(raw: IRawWorkerResult): IEmitResultOutcome 
 		claims.push({ text: c.text.trim(), receiptLink: c.receiptLink, rung: coerceRung(c.rung) });
 	});
 
-	// --- primary action (optional). `other` is the escape hatch: no catalog action
-	// fits, so the worker states a custom ask the human answers via Steer (no typed
-	// action runs). Any other actionType is validated against the catalog. ---
+	// --- primary action (optional). The evidence pack is the mandatory core; a
+	// typed action is a bonus. An action becomes a one-click button ONLY when it is
+	// a valid catalog action with a valid payload. `other`, an out-of-catalog action,
+	// or a malformed payload all DEGRADE to a custom ask the human answers via Steer:
+	// the model's suggestion is surfaced and the evidence still lands. The result is
+	// never rejected over the action, so a good investigation is never lost and a
+	// task never hangs waiting for a well-formed action. ---
 	let primaryAction: IPrimaryAction | undefined;
 	let customAsk: string | undefined;
+	const decisionText = typeof raw.decisionSentence === 'string' ? raw.decisionSentence.trim() : '';
+	const proposesAction = raw.actionType !== undefined || raw.payload !== undefined || raw.label !== undefined;
 	if (raw.actionType === OTHER_ACTION) {
 		const ask = typeof raw.customAsk === 'string' ? raw.customAsk.trim() : '';
-		const fallback = typeof raw.decisionSentence === 'string' ? raw.decisionSentence.trim() : '';
-		customAsk = ask.length > 0 ? ask : fallback;
-	} else if (raw.actionType !== undefined || raw.payload !== undefined || raw.label !== undefined) {
-		if (typeof raw.label !== 'string' || raw.label.trim().length === 0) {
-			problems.push('label must be a non-empty string when an action is proposed');
-		} else if (countWords(raw.label) > MAX_LABEL_WORDS) {
-			problems.push(`label must be at most ${MAX_LABEL_WORDS} words`);
-		}
+		customAsk = ask.length > 0 ? ask : decisionText;
+	} else if (proposesAction) {
 		const actionType = typeof raw.actionType === 'string' ? raw.actionType : '';
 		const validation = validateAction(actionType, raw.payload);
-		if (!validation.valid) {
-			problems.push(...validation.problems);
-		}
-		if (validation.valid && typeof raw.label === 'string' && countWords(raw.label) <= MAX_LABEL_WORDS && raw.label.trim().length > 0) {
-			// Safe: validateAction confirmed actionType is a known ActionType.
-			primaryAction = { label: raw.label.trim(), actionType: actionType as IPrimaryAction['actionType'], payload: raw.payload };
+		if (validation.valid) {
+			// Safe: validateAction confirmed actionType is a known ActionType. The
+			// label is display-only, so a missing/over-long one is cleaned, not rejected.
+			primaryAction = { label: cleanLabel(raw.label, actionType), actionType: actionType as IPrimaryAction['actionType'], payload: raw.payload };
+		} else {
+			// Out-of-catalog action_type or malformed payload: surface the model's
+			// suggestion and let the human Steer, rather than failing the result.
+			customAsk = suggestionAsk(raw, actionType, decisionText);
 		}
 	}
 
@@ -140,6 +138,31 @@ export function validateWorkerResult(raw: IRawWorkerResult): IEmitResultOutcome 
 		primaryAction,
 	};
 	return { ok: true, evidence };
+}
+
+/** A clean, short display label for a valid action: the worker's, trimmed to {@link MAX_LABEL_WORDS}, else the humanized action type. */
+function cleanLabel(rawLabel: string | undefined, actionType: string): string {
+	const t = typeof rawLabel === 'string' ? rawLabel.trim() : '';
+	if (t.length === 0) {
+		return humanizeActionType(actionType);
+	}
+	const words = t.split(/\s+/).filter(Boolean);
+	return words.length <= MAX_LABEL_WORDS ? t : words.slice(0, MAX_LABEL_WORDS).join(' ');
+}
+
+/** Turns an action_type token into a human label, e.g. `add_labels` -> `Add Labels`. */
+function humanizeActionType(actionType: string): string {
+	const words = actionType.split(/[_\s]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1));
+	return words.length ? words.join(' ') : 'Run action';
+}
+
+/** The custom ask shown when a worker proposed an action that is not a valid one-click catalog action. */
+function suggestionAsk(raw: IRawWorkerResult, actionType: string, decisionText: string): string {
+	const suggestion = (typeof raw.label === 'string' && raw.label.trim()) || (actionType ? humanizeActionType(actionType) : '');
+	if (suggestion) {
+		return `Diffy suggested an action -- "${suggestion}" -- that is not a one-click catalog action here. Steer to tell Diffy how to proceed.`;
+	}
+	return decisionText || 'Diffy proposed an action that needs your decision. Steer to proceed.';
 }
 
 /**

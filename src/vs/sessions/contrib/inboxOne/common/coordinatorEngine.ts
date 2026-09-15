@@ -68,9 +68,37 @@ export class CoordinatorEngine {
 	async handleEvent(event: IIngressEvent): Promise<void> {
 		if (event.source === EventSource.Session) {
 			await this.handleSessionEvent(event);
-			return;
+		} else {
+			await this.handleWorldEvent(event);
 		}
-		await this.handleWorldEvent(event);
+		// Any event may have freed a concurrency slot (a worker finished/failed) or
+		// opened one; re-dispatch worker tasks that were queued for capacity so a
+		// task never hangs Cooking without a worker.
+		await this.pumpQueued();
+	}
+
+	/**
+	 * Re-dispatches worker tasks that are Cooking but have no live worker -- i.e.
+	 * they were queued when admission was over budget. Idempotent: a task with a
+	 * live worker is skipped, and {@link dispatchFor} re-queues (a no-op) if there
+	 * is still no capacity. This guarantees a queued task eventually runs once a
+	 * slot frees, so nothing stays stuck Cooking forever.
+	 */
+	private async pumpQueued(): Promise<void> {
+		for (const task of this.store.tasks.get()) {
+			// Only re-dispatch tasks that were queued by admission (no worker ever
+			// started, so the attempt has no session ref). A deferred dispatch
+			// (pending ref, e.g. no host) is left as recorded intent, and a task with
+			// a live/pending worker is not touched.
+			if (task.state !== LogicalTaskState.Cooking || currentAttempt(task)?.sessionRef !== undefined) {
+				continue;
+			}
+			const role = workerRoleFor(task.type);
+			if (role === undefined) {
+				continue; // e.g. a conversation task is not worker-dispatched
+			}
+			await this.dispatchFor(task, role, task.groupKey);
+		}
 	}
 
 	private async handleWorldEvent(event: IIngressEvent): Promise<void> {
@@ -296,4 +324,14 @@ export class CoordinatorEngine {
 
 function sessionRefFor(sessionId: string): string {
 	return `session://worker/${sessionId}`;
+}
+
+/** Maps a task's `type` to the worker role that dispatches it, or `undefined` for non-worker tasks (e.g. conversations). */
+function workerRoleFor(type: string): WorkerRole | undefined {
+	switch (type) {
+		case WorkerRole.IssueTriage: return WorkerRole.IssueTriage;
+		case WorkerRole.CodeReview: return WorkerRole.CodeReview;
+		case WorkerRole.ImplementFix: return WorkerRole.ImplementFix;
+		default: return undefined;
+	}
 }
