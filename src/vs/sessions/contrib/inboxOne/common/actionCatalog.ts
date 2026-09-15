@@ -209,6 +209,9 @@ const ACTION_PAYLOAD_SPECS: { readonly [K in ActionType]: string } = {
 	[ActionType.GrantScope]: 'repo: string, scope: string',
 };
 
+/** Sentinel action_type a worker uses when NO catalog action fits but it has a specific ask for the human (answered via Steer). */
+export const OTHER_ACTION = 'other';
+
 /**
  * Renders the fixed action catalog for the worker prompt: every action_type with
  * its exact payload fields (including finite value sets like the merge strategy)
@@ -216,7 +219,8 @@ const ACTION_PAYLOAD_SPECS: { readonly [K in ActionType]: string } = {
  * exactly; the host validates against the same catalog.
  */
 export function describeActionCatalog(): string {
-	return (Object.keys(ACTION_CATALOG) as ActionType[])
-		.map(t => `- ${t} [${ACTION_CATALOG[t].reversibility}]: { ${ACTION_PAYLOAD_SPECS[t]} }`)
-		.join('\n');
+	const actions = (Object.keys(ACTION_CATALOG) as ActionType[])
+		.map(t => `- ${t} [${ACTION_CATALOG[t].reversibility}]: { ${ACTION_PAYLOAD_SPECS[t]} }`);
+	actions.push(`- ${OTHER_ACTION}: no catalog action fits, but you have a specific recommendation or question for the human. Put that ask in the \`customAsk\` field (a full sentence or two). The inbox will show your ask and the human answers it via Steer -- no payload/label needed.`);
+	return actions.join('\n');
 }

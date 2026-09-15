@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { validateAction } from './actionCatalog.js';
+import { OTHER_ACTION, validateAction } from './actionCatalog.js';
 import { EvidenceRung, IEvidenceClaim, IEvidenceFreshness, IEvidencePack, IPrimaryAction } from './inboxOneTypes.js';
 
 /**
@@ -34,6 +34,8 @@ export interface IRawWorkerResult {
 	/** A short headline (a few words) for the inbox list title, distinct from the full decisionSentence. */
 	readonly title?: string;
 	readonly decisionSentence?: string;
+	/** The worker's specific ask for the human when actionType is `other` (answered via Steer). */
+	readonly customAsk?: string;
 	readonly claims?: readonly IRawClaim[];
 	readonly gapLine?: string;
 	readonly freshness?: IEvidenceFreshness;
@@ -98,9 +100,16 @@ export function validateWorkerResult(raw: IRawWorkerResult): IEmitResultOutcome 
 		claims.push({ text: c.text.trim(), receiptLink: c.receiptLink, rung: coerceRung(c.rung) });
 	});
 
-	// --- primary action (optional, but if present must be valid) ---
+	// --- primary action (optional). `other` is the escape hatch: no catalog action
+	// fits, so the worker states a custom ask the human answers via Steer (no typed
+	// action runs). Any other actionType is validated against the catalog. ---
 	let primaryAction: IPrimaryAction | undefined;
-	if (raw.actionType !== undefined || raw.payload !== undefined || raw.label !== undefined) {
+	let customAsk: string | undefined;
+	if (raw.actionType === OTHER_ACTION) {
+		const ask = typeof raw.customAsk === 'string' ? raw.customAsk.trim() : '';
+		const fallback = typeof raw.decisionSentence === 'string' ? raw.decisionSentence.trim() : '';
+		customAsk = ask.length > 0 ? ask : fallback;
+	} else if (raw.actionType !== undefined || raw.payload !== undefined || raw.label !== undefined) {
 		if (typeof raw.label !== 'string' || raw.label.trim().length === 0) {
 			problems.push('label must be a non-empty string when an action is proposed');
 		} else if (countWords(raw.label) > MAX_LABEL_WORDS) {
@@ -124,6 +133,7 @@ export function validateWorkerResult(raw: IRawWorkerResult): IEmitResultOutcome 
 	const evidence: Omit<IEvidencePack, 'revision'> = {
 		title: shortTitle(raw.title),
 		decisionSentence: raw.decisionSentence!.trim(),
+		customAsk,
 		claims,
 		gapLine: raw.gapLine!.trim(),
 		freshness: raw.freshness ?? { computedAt: Date.now() },

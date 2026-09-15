@@ -62,6 +62,29 @@ suite('Inbox One - emit-result validation', () => {
 		}
 	});
 
+	test('the `other` action becomes a custom ask (Steer), not a typed action', () => {
+		const r = validateWorkerResult(baseEvidence({ actionType: 'other', customAsk: 'Which rollout order for #21 and #22?' }));
+		assert.strictEqual(r.ok, true);
+		if (r.ok) {
+			assert.strictEqual(r.evidence.customAsk, 'Which rollout order for #21 and #22?');
+			assert.strictEqual(r.evidence.primaryAction, undefined, 'other never yields a typed action');
+		}
+
+		// A bare `other` (no customAsk) falls back to the decisionSentence as the ask.
+		const bare = validateWorkerResult(baseEvidence({ actionType: 'other' }));
+		assert.strictEqual(bare.ok, true);
+		if (bare.ok) {
+			assert.strictEqual(bare.evidence.customAsk, 'PR #842 is ready to approve');
+		}
+
+		// A normal evidence-only result has no custom ask.
+		const plain = validateWorkerResult(baseEvidence());
+		assert.strictEqual(plain.ok, true);
+		if (plain.ok) {
+			assert.strictEqual(plain.evidence.customAsk, undefined);
+		}
+	});
+
 	test('rejects a missing decision sentence', () => {
 		const result = validateWorkerResult(baseEvidence({ decisionSentence: '' }));
 		assert.strictEqual(result.ok, false);

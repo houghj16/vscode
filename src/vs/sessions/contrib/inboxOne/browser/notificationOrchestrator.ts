@@ -13,6 +13,7 @@ import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { GroupKey, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { decideNotification, INotificationLedgerEntry } from '../common/notificationPolicy.js';
+import { IInboxOneNavigator } from './inboxOneNavigator.js';
 
 /**
  * Drives the human-attention push surface (design 7.5, E.5). Subscribes to the
@@ -40,6 +41,7 @@ export class NotificationOrchestrator extends Disposable {
 		@IInboxOneSettings private readonly settings: IInboxOneSettings,
 		@INotificationService private readonly notificationService: INotificationService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IInboxOneNavigator private readonly navigator: IInboxOneNavigator,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
@@ -88,8 +90,12 @@ export class NotificationOrchestrator extends Disposable {
 			severity,
 			scope,
 			[{
-				label: localize('inboxOne.notify.open', 'Open Inbox'),
-				run: () => { void this.commandService.executeCommand('inboxOne.showInbox'); },
+				label: localize('inboxOne.notify.open', 'Open'),
+				run: () => {
+					// Open the inbox and focus this specific item (design 7.5).
+					void this.commandService.executeCommand('inboxOne.showInbox');
+					this.navigator.reveal(task.id);
+				},
 			}],
 			{ sticky: task.tier === InboxOneTier.Critical },
 		);

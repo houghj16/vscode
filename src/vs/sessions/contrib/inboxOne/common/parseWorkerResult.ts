@@ -63,6 +63,7 @@ export function parseWorkerResult(text: string): IRawWorkerResult | undefined {
 		label: str(raw.label),
 		title: str(raw.title),
 		decisionSentence: str(raw.decisionSentence) ?? str(raw.decision_sentence),
+		customAsk: str(raw.customAsk) ?? str(raw.custom_ask),
 		claims: toClaims(raw.claims),
 		gapLine: str(raw.gapLine) ?? str(raw.gap_line),
 	};

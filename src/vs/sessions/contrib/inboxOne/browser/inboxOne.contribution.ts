@@ -21,6 +21,7 @@ import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { DiffyCoordinatorService } from './diffyCoordinatorService.js';
 import { IInboxOneSessionLauncher, InboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
+import { IInboxOneNavigator, InboxOneNavigator } from './inboxOneNavigator.js';
 import { EventIngress } from './eventIngress.js';
 import { INBOX_ONE_ACTIONS, INBOX_ONE_DEV_ACTIONS } from './inboxOneCommands.js';
 import { InboxOneSettingsService } from './inboxOneSettingsService.js';
@@ -45,6 +46,7 @@ registerSingleton(IInboxOneStore, InboxOneStore, InstantiationType.Delayed);
 registerSingleton(IInboxOneSettings, InboxOneSettingsService, InstantiationType.Delayed);
 registerSingleton(IInboxOneFileStore, WorkbenchInboxOneFileStore, InstantiationType.Delayed);
 registerSingleton(IInboxOneSessionLauncher, InboxOneSessionLauncher, InstantiationType.Delayed);
+registerSingleton(IInboxOneNavigator, InboxOneNavigator, InstantiationType.Delayed);
 registerSingleton(IEventIngress, EventIngress, InstantiationType.Delayed);
 registerSingleton(IDiffyCoordinatorService, DiffyCoordinatorService, InstantiationType.Delayed);
 

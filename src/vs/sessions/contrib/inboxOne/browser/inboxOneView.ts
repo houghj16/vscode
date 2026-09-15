@@ -20,6 +20,7 @@ import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
 import { ActionType, GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
+import { IInboxOneNavigator } from './inboxOneNavigator.js';
 
 interface ITierSpec {
 	readonly key: string;
@@ -60,6 +61,8 @@ export class InboxOneView extends AbstractCustomView {
 	private listEl: HTMLElement | undefined;
 	private detailEl: HTMLElement | undefined;
 	private confirmPanel: HTMLElement | undefined;
+	/** A task whose list row should be scrolled into view on the next render (deep-link reveal). */
+	private pendingScrollTaskId: string | undefined;
 	/** Sections the user has collapsed (design/wireframes 6: the caret collapses a section). */
 	private readonly collapsedSections = new Set<string>();
 	/** The repo scope filter (wireframes 2 "my" selector); undefined = all repos. */
@@ -73,11 +76,19 @@ export class InboxOneView extends AbstractCustomView {
 		@IStorageService private readonly storageService: IStorageService,
 		@ISessionsService private readonly sessionsService: ISessionsService,
 		@IInboxOneSessionLauncher private readonly sessionLauncher: IInboxOneSessionLauncher,
+		@IInboxOneNavigator private readonly navigator: IInboxOneNavigator,
 	) {
 		super();
 		for (const key of this.loadCollapsedSections()) {
 			this.collapsedSections.add(key);
 		}
+		// A notification (or any caller) can ask us to open + focus a specific item.
+		this._register(this.navigator.onDidRequestReveal(() => {
+			const taskId = this.navigator.consumePendingReveal();
+			if (taskId) {
+				this.selectAndReveal(taskId);
+			}
+		}));
 		this.description = this.store.tasks.map(tasks => {
 			const cooking = tasks.filter(t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming).length;
 			const decisions = tasks.filter(t => t.state === LogicalTaskState.Decision || t.state === LogicalTaskState.Blocked).length;
@@ -135,6 +146,31 @@ export class InboxOneView extends AbstractCustomView {
 				this.renderDetail(tasks.find(t => t.id === selected));
 			}
 		}));
+
+		// Apply a reveal requested before this view rendered (e.g. a notification's
+		// "Open" that created the view), so it focuses the linked item on first show.
+		const pending = this.navigator.consumePendingReveal();
+		if (pending) {
+			this.selectAndReveal(pending);
+		}
+	}
+
+	/**
+	 * Opens and focuses a specific task: expands its (possibly collapsed) section,
+	 * selects it so its evidence shows on the right, and scrolls the row into view.
+	 * Used by the notification "Open" deep-link.
+	 */
+	private selectAndReveal(taskId: string): void {
+		const task = this.store.getTask(taskId);
+		if (task) {
+			const section = SECTIONS.find(s => s.match(task));
+			if (section && this.collapsedSections.has(section.key)) {
+				this.collapsedSections.delete(section.key);
+				this.persistCollapsedSections();
+			}
+		}
+		this.pendingScrollTaskId = taskId;
+		this.selectedTaskId.set(taskId, undefined);
 	}
 
 	/** The "my" repo scope selector (wireframes 2): scope the inbox to one enrolled repo or all. */
@@ -326,6 +362,10 @@ export class InboxOneView extends AbstractCustomView {
 			row.appendChild(this.renderCookingStages(task, true));
 		}
 		this._register(addClick(row, () => this.selectedTaskId.set(task.id, undefined)));
+		if (this.pendingScrollTaskId === task.id) {
+			this.pendingScrollTaskId = undefined;
+			queueMicrotask(() => row.scrollIntoView({ block: 'nearest' }));
+		}
 		return row;
 	}
 
@@ -359,6 +399,12 @@ export class InboxOneView extends AbstractCustomView {
 
 		if (pack?.primaryAction) {
 			detail.appendChild($('.inbox-one-detail-accepting', undefined, this.acceptingLine(pack.primaryAction.actionType)));
+		}
+
+		if (pack?.customAsk) {
+			const ask = detail.appendChild($('.inbox-one-detail-ask'));
+			ask.appendChild($('.inbox-one-detail-ask-label', undefined, localize('inboxOne.diffyAsks', 'Diffy needs your decision:')));
+			ask.appendChild($('.inbox-one-detail-ask-body', undefined, pack.customAsk));
 		}
 
 		if (pack && pack.claims.length) {
@@ -539,6 +585,15 @@ export class InboxOneView extends AbstractCustomView {
 
 	private renderDetailActions(task: ILogicalTask): HTMLElement {
 		const actions = $('.inbox-one-detail-actions');
+		// A custom ask ("other" action) has no typed action to accept; the human
+		// answers the worker's ask via Steer, so Steer is the primary affordance.
+		if (task.evidence?.customAsk) {
+			const steerPrimary = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.steer', 'Steer')} \u25b8`));
+			this._register(addClick(steerPrimary, () => this.steer(task)));
+			const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
+			this._register(addClick(dismiss, () => this.dismiss(task)));
+			return actions;
+		}
 		const primaryLabel = task.evidence?.primaryAction?.label ?? localize('inboxOne.accept', 'Accept');
 		const accept = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${primaryLabel} \u25b8`));
 		this._register(addClick(accept, () => this.confirmAndAccept(task)));

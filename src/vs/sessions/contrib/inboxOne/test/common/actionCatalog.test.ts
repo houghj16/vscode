@@ -86,6 +86,8 @@ suite('Inbox One - action catalog', () => {
 		assert.ok(text.includes('"merge" | "squash" | "rebase"'), 'lists the merge strategy enum');
 		// Structured payload requirements the worker previously got wrong (add_labels).
 		assert.ok(/add:\s*string\[\]/.test(text), 'lists add_labels.add as a string array');
+		// The escape hatch for when no catalog action fits.
+		assert.ok(text.includes('other') && text.includes('customAsk'), 'documents the other/customAsk escape hatch');
 	});
 });
 

@@ -24,7 +24,7 @@ export interface ISeedSkillFile {
 
 const EMIT_RESULT = `---
 id: emit-result
-version: 3
+version: 4
 ---
 # Emit result (framework output contract)
 
@@ -42,7 +42,11 @@ deploy, grant_scope. Provide a payload that matches that action's schema exactly
 sets (for example the merge strategy). Include all required fields and use only
 allowed values. Do not invent action types or fields; the host validates and
 rejects anything out of catalog or malformed. If you cannot fully populate a
-payload, propose no action.
+payload, propose no action. If no catalog action fits but you have a specific
+recommendation or question that needs a human decision, set action_type to
+"other" and put that ask (a full sentence or two) in a \`customAsk\` field -- the
+inbox shows your ask and the human answers it via Steer. Use "other" instead of
+forcing an ill-fitting catalog action.
 
 2. A short action label. Author a free-form, task-specific button label of at
 most 3-4 words (for example: "Approve PR", "Group issues", "Merge fix"). The
@@ -73,10 +77,16 @@ fields (the host parses this block; prose above it is ignored):
 {"action_type": "approve_pr", "payload": {"repo": "owner/name", "prNumber": 842}, "label": "Approve PR", "title": "PR #842 ready to approve", "decisionSentence": "PR #842 is ready to approve: all checks pass and two owners approved.", "claims": [{"text": "47/47 checks pass", "receiptLink": "https://.../runs/1", "rung": 1}], "gapLine": "Not verified: <the one concrete, decision-relevant thing you could not confirm>"}
 \`\`\`
 
+For a custom ask, set action_type to "other" with a customAsk instead of a payload/label, e.g.:
+
+\`\`\`inbox-one-result
+{"action_type": "other", "customAsk": "Two owners disagree on the rollout order for #21 and #22 -- which should ship first?", "title": "Rollout order for #21/#22", "decisionSentence": "The auth fixes for #21 and #22 conflict on ordering and need a human call before either ships.", "claims": [{"text": "#21 and #22 both touch auth.ts token handling", "receiptLink": "https://.../issues/21", "rung": 1}], "gapLine": "Not verified: whether the two fixes can land together"}
+\`\`\`
+
 Emit exactly one such block. Omit \`action_type\`/\`payload\`/\`label\` only when you
-are reporting a blocker with no action; always include \`title\`, \`decisionSentence\`,
-\`claims\`, and \`gapLine\`. The host validates the action against the catalog and
-rejects anything malformed.
+are reporting a blocker with no action; for a custom ask use action_type "other"
+with \`customAsk\`. Always include \`title\`, \`decisionSentence\`, \`claims\`, and
+\`gapLine\`. The host validates any catalog action and rejects anything malformed.
 `;
 
 const GROUP_ISSUES_BY_THEME = `---

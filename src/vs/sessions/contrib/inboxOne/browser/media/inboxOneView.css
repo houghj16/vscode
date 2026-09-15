@@ -83,6 +83,27 @@
 	background: var(--vscode-textBlockQuote-background);
 }
 
+.inbox-one-detail-ask {
+	margin: 12px 0;
+	padding: 8px 12px;
+	border-left: 3px solid var(--vscode-chat-inputWorkingBorderColor1, var(--vscode-progressBar-background));
+	border-radius: 2px;
+	background: var(--vscode-textBlockQuote-background);
+}
+.inbox-one-detail-ask-label {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--vscode-descriptionForeground);
+	margin-bottom: 4px;
+}
+.inbox-one-detail-ask-body {
+	font-size: 13px;
+	color: var(--vscode-foreground);
+	white-space: pre-wrap;
+}
+
 .inbox-one-detail-claims-header {
 	font-weight: 600;
 	margin-bottom: 4px;

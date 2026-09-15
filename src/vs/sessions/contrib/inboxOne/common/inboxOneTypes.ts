@@ -186,6 +186,8 @@ export interface IEvidencePack {
 	/** A short worker-authored headline (a few words) used as the inbox list title. */
 	readonly title?: string;
 	readonly decisionSentence: string;
+	/** Present when the worker chose the `other` action: a specific ask for the human, answered via Steer (no typed action). */
+	readonly customAsk?: string;
 	readonly claims: readonly IEvidenceClaim[];
 	/** The mandatory one-line "Not verified" gap. */
 	readonly gapLine: string;
