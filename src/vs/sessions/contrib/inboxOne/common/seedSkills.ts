@@ -24,7 +24,7 @@ export interface ISeedSkillFile {
 
 const EMIT_RESULT = `---
 id: emit-result
-version: 1
+version: 2
 ---
 # Emit result (framework output contract)
 
@@ -45,10 +45,16 @@ of catalog.
 most 3-4 words (for example: "Approve PR", "Group issues", "Merge fix"). The
 label is display-only and never changes what executes.
 
-3. An evidence pack. Lead with the consequence in one sentence. Provide 2-3
-claims, each a short human-legible statement paired with a real receipt link
-(a run log, a diff, a review thread, a test output). End with exactly one
-honest "Not verified" gap line stating what you did not confirm.
+3. A short title. Author a headline of a few words (about 3-6) that names the
+subject and the gist -- this is the one-line entry in the inbox list, so keep it
+scannable (for example: "PR #842 ready to approve", "Group issues #21 & #22").
+The title is NOT the full recommendation; that goes in decisionSentence.
+
+4. An evidence pack. Lead with the consequence in one sentence (decisionSentence
+-- the full recommendation shown when the item is opened). Provide 2-3 claims,
+each a short human-legible statement paired with a real receipt link (a run log,
+a diff, a review thread, a test output). End with exactly one honest "Not
+verified" gap line stating what you did not confirm.
 
 Ground every claim in a real receipt. Never fabricate a receipt. If you cannot
 produce trustworthy evidence, emit no action and report the blocker instead.
@@ -60,12 +66,13 @@ code block tagged \`inbox-one-result\` containing one JSON object with these
 fields (the host parses this block; prose above it is ignored):
 
 \`\`\`inbox-one-result
-{"action_type": "approve_pr", "payload": {"repo": "owner/name", "prNumber": 842}, "label": "Approve PR", "decisionSentence": "PR #842 is ready to approve", "claims": [{"text": "47/47 checks pass", "receiptLink": "https://.../runs/1", "rung": 1}], "gapLine": "Not verified: behavior under production load"}
+{"action_type": "approve_pr", "payload": {"repo": "owner/name", "prNumber": 842}, "label": "Approve PR", "title": "PR #842 ready to approve", "decisionSentence": "PR #842 is ready to approve: all checks pass and two owners approved.", "claims": [{"text": "47/47 checks pass", "receiptLink": "https://.../runs/1", "rung": 1}], "gapLine": "Not verified: <the one concrete, decision-relevant thing you could not confirm>"}
 \`\`\`
 
 Emit exactly one such block. Omit \`action_type\`/\`payload\`/\`label\` only when you
-are reporting a blocker with no action. The host validates the action against the
-catalog and rejects anything malformed.
+are reporting a blocker with no action; always include \`title\`, \`decisionSentence\`,
+\`claims\`, and \`gapLine\`. The host validates the action against the catalog and
+rejects anything malformed.
 `;
 
 const GROUP_ISSUES_BY_THEME = `---

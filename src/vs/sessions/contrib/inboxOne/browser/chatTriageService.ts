@@ -113,6 +113,7 @@ export class ChatTriageService extends Disposable {
 			const title = session.title.get();
 			if (kind === 'needs_input') {
 				await this.store.setEvidence(task.id, {
+					title,
 					decisionSentence: `${title} is waiting for your input`,
 					claims: [],
 					gapLine: '',
@@ -124,6 +125,7 @@ export class ChatTriageService extends Disposable {
 				this.logService.info(`[inboxOne] surfaced conversation ${sessionId} needing input`);
 			} else {
 				await this.store.setEvidence(task.id, {
+					title,
 					decisionSentence: `${title} finished`,
 					claims: [],
 					gapLine: '',

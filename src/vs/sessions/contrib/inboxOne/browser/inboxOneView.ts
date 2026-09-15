@@ -33,6 +33,9 @@ const DIFFY_SELECTION = '__diffy__';
 /** Storage key for the persisted set of collapsed section keys. */
 const COLLAPSED_SECTIONS_KEY = 'inboxOne.collapsedSections';
 
+/** Fallback word cap for a list title derived from decisionSentence when a worker did not author one. */
+const LIST_TITLE_WORDS = 6;
+
 /** The inbox sections in display order (design 3.1). */
 const SECTIONS: readonly ITierSpec[] = [
 	{ key: 'critical', label: localize('inboxOne.critical', 'CRITICAL'), match: t => t.state === LogicalTaskState.Decision && t.tier === InboxOneTier.Critical },
@@ -316,7 +319,7 @@ export class InboxOneView extends AbstractCustomView {
 		if (blocked) {
 			title.appendChild($('span.inbox-one-item-blocked-badge', undefined, localize('inboxOne.blockedBadge', '! BLOCKED')));
 		}
-		title.appendChild($('span', undefined, task.evidence?.decisionSentence ?? this.fallbackTitle(task)));
+		title.appendChild($('span', undefined, this.listTitle(task)));
 		const meta = row.appendChild($('.inbox-one-item-meta'));
 		if (task.repo) {
 			meta.appendChild($('span.inbox-one-item-repo', undefined, task.repo));
@@ -619,6 +622,25 @@ export class InboxOneView extends AbstractCustomView {
 	private fallbackTitle(task: ILogicalTask): string {
 		const subject = task.sourceEvent.subject;
 		return localize('inboxOne.itemTitle', '{0} {1} ({2})', task.type, subject.kind, subject.id);
+	}
+
+	/**
+	 * The short, scannable inbox list title: the worker-authored headline when
+	 * present, else the first {@link LIST_TITLE_WORDS} words of the fuller
+	 * decisionSentence (which stays the first summary line of the expanded detail),
+	 * else the generic subject fallback.
+	 */
+	private listTitle(task: ILogicalTask): string {
+		const authored = task.evidence?.title?.trim();
+		if (authored) {
+			return authored;
+		}
+		const decision = task.evidence?.decisionSentence?.trim();
+		if (decision) {
+			const words = decision.split(/\s+/).filter(Boolean);
+			return words.length <= LIST_TITLE_WORDS ? decision : words.slice(0, LIST_TITLE_WORDS).join(' ') + '...';
+		}
+		return this.fallbackTitle(task);
 	}
 
 	private stateLabel(state: LogicalTaskState): string {

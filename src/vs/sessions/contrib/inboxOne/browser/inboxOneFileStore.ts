@@ -70,11 +70,14 @@ export class InboxOneFileStore extends Disposable implements IInboxOneFileStore 
 		for (const dir of [this.skillsRoot, this.wikiRoot, this.patternsRoot, this.experienceRoot, this.historyRoot]) {
 			await this.ensureDir(dir);
 		}
-		// Seed bundled defaults only for skills that do not already exist, so the
+		// Seed bundled defaults. Framework skills are immutable and bundle-owned
+		// (never modified by the learning loop), so always refresh them from the
+		// current bundle; role/coordinator skills are seeded only when absent so the
 		// learning loop's evolved versions are never clobbered on restart.
 		for (const seed of ALL_SEED_SKILLS) {
 			const target = joinPath(this.skillsRoot, seed.path);
-			if (!(await this.fileService.exists(target))) {
+			const isFrameworkSeed = seed.path.startsWith('_framework/');
+			if (isFrameworkSeed || !(await this.fileService.exists(target))) {
 				await this.ensureDir(dirOf(target));
 				await this.writeText(target, seed.content);
 			}
@@ -329,7 +332,7 @@ function relativePath(root: URI, child: URI): string {
 }
 
 function patternMatchesRoles(pattern: IStoredWikiPattern, roleNames: readonly string[]): boolean {
-	const tags = pattern.frontmatter['roles'] ?? pattern.frontmatter['tags'];
+	const tags = pattern.frontmatter.roles ?? pattern.frontmatter.tags;
 	if (Array.isArray(tags)) {
 		return tags.some(t => typeof t === 'string' && roleNames.includes(t));
 	}

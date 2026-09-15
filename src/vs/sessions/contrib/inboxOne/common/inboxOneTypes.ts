@@ -183,6 +183,8 @@ export interface IPrimaryAction {
  */
 export interface IEvidencePack {
 	readonly revision: number;
+	/** A short worker-authored headline (a few words) used as the inbox list title. */
+	readonly title?: string;
 	readonly decisionSentence: string;
 	readonly claims: readonly IEvidenceClaim[];
 	/** The mandatory one-line "Not verified" gap. */

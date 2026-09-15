@@ -27,6 +27,7 @@ const GOOD_BLOCK = [
 		action_type: 'approve_pr',
 		payload: { repo: 'acme/api', prNumber: 842 },
 		label: 'Approve PR',
+		title: 'PR #842 ready to approve',
 		decisionSentence: 'PR #842 is ready to approve',
 		claims: [{ text: '47/47 checks pass', receiptLink: 'https://run/1', rung: 2 }],
 		gapLine: 'Not verified: behavior under production load',
@@ -44,6 +45,7 @@ suite('Inbox One - parseWorkerResult', () => {
 		assert.strictEqual(raw!.actionType, 'approve_pr');
 		assert.strictEqual(raw!.decisionSentence, 'PR #842 is ready to approve');
 		assert.strictEqual(raw!.label, 'Approve PR');
+		assert.strictEqual(raw!.title, 'PR #842 ready to approve');
 		assert.strictEqual(raw!.claims!.length, 1);
 		assert.strictEqual(raw!.claims![0].rung, 2);
 		// The parsed raw result must pass host validation into an evidence pack.
