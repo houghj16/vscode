@@ -18,7 +18,7 @@ import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
-import { ActionType, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { ActionType, GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { composeSteerRelay } from '../common/workerBrief.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 import { IInboxOneNavigator } from './inboxOneNavigator.js';
@@ -253,6 +253,10 @@ export class InboxOneView extends AbstractCustomView {
 	private async continueTask(task: ILogicalTask, intent: 'steer' | 'reopen', message: string): Promise<void> {
 		const continuationKey = `${task.id}:${intent}:${Date.now()}`;
 		const trigger = intent === 'reopen' ? TaskTrigger.Reopen : TaskTrigger.Steer;
+		// Record the user's steering/correction verbatim as a gesture, so the full
+		// steering history (not just the gesture kind) reaches the distiller when the
+		// task later resolves (design 6.2). Reopen is a steer on a completed result.
+		void this.store.recordGesture({ taskId: task.id, kind: GestureKind.Steer, note: message, timestamp: Date.now() });
 		// Diffy relays the instruction into the SAME worker session (warm context,
 		// technical spec 2.4). Carry the ref into the new attempt so the session
 		// stays owned by the task (Open works, and its next finish re-lands here).

@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { applyToSkillImpact, formatSkillImpact, LearningTarget, parseSkillImpact, routeGesture, skillScore } from '../../common/learningLoop.js';
+import { applyToSkillImpact, assembleSteeringTranscript, formatSkillImpact, LearningTarget, parseSkillImpact, routeGesture, skillScore } from '../../common/learningLoop.js';
 import { applyGestureToAuthority, areaKey, authorityAffinity, AuthorityMap, isOwnedArea, parseAuthority, serializeAuthority } from '../../common/authoritySignal.js';
 import { GestureKind } from '../../common/inboxOneTypes.js';
 
@@ -49,6 +49,20 @@ suite('Inbox One - learning loop routing', () => {
 		const parsed = parseSkillImpact(formatSkillImpact(rows));
 		assert.strictEqual(parsed.length, 2);
 		assert.deepStrictEqual(parsed.find(r => r.skillId === 'a'), { skillId: 'a', used: 1, accepted: 1, steered: 0, dismissed: 0 });
+	});
+
+	test('assembleSteeringTranscript collects the user steer notes in order', () => {
+		const transcript = assembleSteeringTranscript([
+			{ taskId: 't', kind: GestureKind.Steer, note: 'group by customer, not file', timestamp: 1 },
+			{ taskId: 't', kind: GestureKind.Accept, timestamp: 2 },
+			{ taskId: 't', kind: GestureKind.Steer, note: 'also skip archived repos', timestamp: 3 },
+		]);
+		assert.strictEqual(transcript, 'Steer 1: group by customer, not file\nSteer 2: also skip archived repos');
+	});
+
+	test('assembleSteeringTranscript is undefined when the user never steered', () => {
+		assert.strictEqual(assembleSteeringTranscript([{ taskId: 't', kind: GestureKind.Accept, timestamp: 1 }]), undefined);
+		assert.strictEqual(assembleSteeringTranscript([{ taskId: 't', kind: GestureKind.Steer, note: '   ', timestamp: 1 }]), undefined);
 	});
 });
 

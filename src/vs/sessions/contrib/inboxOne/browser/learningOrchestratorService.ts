@@ -11,7 +11,7 @@ import { IAutomationStorageService } from '../../automations/common/automationSt
 import { IInboxOneFileStore } from '../common/inboxOneFileStore.js';
 import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { GestureKind, ILogicalTask, LogicalTaskState } from '../common/inboxOneTypes.js';
-import { IExperienceRecord } from '../common/learningLoop.js';
+import { assembleSteeringTranscript, IExperienceRecord } from '../common/learningLoop.js';
 import { DistillerSessionDispatcher } from './distillerSessionDispatcher.js';
 import { LearningOrchestrator } from './learningOrchestrator.js';
 
@@ -80,14 +80,18 @@ export class LearningOrchestratorService extends Disposable {
 				? GestureKind.NotMyArea
 				: GestureKind.Dismiss;
 
-		const gestures = this.store.getGestures(task.id);
+		// The full steering history from the user (design 6.2): every steer note this
+		// task accrued over its lifecycle, so the distiller sees the rich correction
+		// signal, not just that a steer happened. Routing stays on the terminal gesture.
+		const steeringTranscript = assembleSteeringTranscript(this.store.getGestures(task.id));
 		const record: IExperienceRecord = {
 			resolutionId,
 			taskId: task.id,
 			repo: task.repo,
 			role: task.type,
 			tier: task.tier,
-			gesture: gestures[gestures.length - 1]?.kind ?? gesture,
+			gesture,
+			steeringTranscript,
 			outcome: task.state === LogicalTaskState.Completed ? 'accepted' : (task.archiveReason ?? 'archived'),
 			resolvedAt: Date.now(),
 		};

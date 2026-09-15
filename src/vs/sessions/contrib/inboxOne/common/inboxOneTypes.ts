@@ -244,6 +244,8 @@ export interface ILogicalTask {
 export interface IGesture {
 	readonly taskId: string;
 	readonly kind: GestureKind;
+	/** The user's steering/correction text, when the gesture carried one (design 6.2). */
+	readonly note?: string;
 	/** Reference to the captured steering transcript in `/experience`. */
 	readonly steeringTranscriptRef?: string;
 	readonly timestamp: number;

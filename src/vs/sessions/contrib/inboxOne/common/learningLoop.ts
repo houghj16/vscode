@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { GestureKind, InboxOneTier } from './inboxOneTypes.js';
+import { GestureKind, IGesture, InboxOneTier } from './inboxOneTypes.js';
 
 /**
  * Learning-loop records and routing (design 6, technical spec 10).
@@ -36,6 +36,23 @@ export interface IExperienceRecord {
 	/** Free-form outcome summary. */
 	readonly outcome?: string;
 	readonly resolvedAt: number;
+}
+
+/**
+ * Assembles the user's steering messages (in chronological order) into the
+ * steering transcript the distiller consumes (design 6.2). Steering is the
+ * primary correction signal, so the full history of the user's steers - not just
+ * the gesture - is what the distiller must see. Returns `undefined` when the user
+ * never steered this task.
+ */
+export function assembleSteeringTranscript(gestures: readonly IGesture[]): string | undefined {
+	const notes = gestures
+		.filter(g => g.kind === GestureKind.Steer && !!g.note && g.note.trim().length > 0)
+		.map(g => g.note!.trim());
+	if (notes.length === 0) {
+		return undefined;
+	}
+	return notes.map((note, i) => `Steer ${i + 1}: ${note}`).join('\n');
 }
 
 /** Which learning artifact a gesture primarily updates (design 6.2). */
