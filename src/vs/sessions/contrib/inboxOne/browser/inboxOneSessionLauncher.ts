@@ -58,11 +58,24 @@ export interface IInboxOneSessionLauncher {
 	 * or the ref is not a real session.
 	 */
 	relay(sessionRef: string, message: string): Promise<boolean>;
+
+	/**
+	 * Whether `sessionRef` names a session this launcher created -- i.e. an
+	 * inbox-internal ambient session (a dispatched worker or the learning
+	 * distiller), not a session a human started. Conversation triage uses this to
+	 * skip Diffy's own machinery so only genuine user chats are surfaced. Tracked
+	 * in-memory for the window's lifetime; dispatched workers additionally resolve
+	 * durably via their owning task, so this is only relied on for the distiller.
+	 */
+	isManaged(sessionRef: string): boolean;
 }
 
 export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 
 	declare readonly _serviceBrand: undefined;
+
+	/** Resources of sessions this launcher created (inbox-internal ambient sessions). */
+	private readonly managed = new Set<string>();
 
 	constructor(
 		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
@@ -107,6 +120,7 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 				return undefined;
 			}
 			if (session) {
+				this.managed.add(session.resource.toString());
 				this.logService.info(`[inboxOne] launched ${options.activity} -> ${session.resource.toString()}`);
 			}
 			return session;
@@ -134,6 +148,10 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 			this.logService.warn(`[inboxOne] relay to ${sessionRef} failed: ${err instanceof Error ? err.message : String(err)}`);
 			return false;
 		}
+	}
+
+	isManaged(sessionRef: string): boolean {
+		return this.managed.has(sessionRef);
 	}
 
 	/**

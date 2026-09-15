@@ -80,6 +80,20 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		assert.strictEqual(sessions.created[0].autopilotConfig, 'autopilot', 'autopilot is also seeded via automationConfiguration for the agent host');
 	});
 
+	test('tracks launched sessions as inbox-managed so conversation triage can skip them', async () => {
+		const sessions = new FakeSessions();
+		const folder = URI.file('/repo');
+		sessions.servable.add(folder.toString());
+		sessions.createResult = fakeSession('agent-host-session://distiller-1');
+		const launcher = make(sessions, folder, []);
+
+		assert.strictEqual(launcher.isManaged('agent-host-session://distiller-1'), false, 'unknown before launch');
+		await launcher.launch('run', { title: 'Diffy distiller', activity: 'distiller' });
+
+		assert.strictEqual(launcher.isManaged('agent-host-session://distiller-1'), true, 'the launched session is inbox-managed');
+		assert.strictEqual(launcher.isManaged('agent-host-session://a-user-chat'), false, 'a session we did not create is not managed');
+	});
+
 	test('falls back to the most-recent workspace that can host a session (composer default)', async () => {
 		const sessions = new FakeSessions();
 		const stale = URI.file('/stale');
