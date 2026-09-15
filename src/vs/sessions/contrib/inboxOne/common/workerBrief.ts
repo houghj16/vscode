@@ -42,7 +42,7 @@ export const WORKER_OPERATING_ENVELOPE = [
 	'- Ground every claim in a real receipt (a run log, a diff, a review thread, a test output). Never fabricate a receipt. If you cannot produce trustworthy evidence, emit no action and report the blocker honestly instead.',
 	'- You run fully autonomously with no interactive user available. Never ask questions, request confirmation, or wait for input. Make the best-judgment decision, state any assumption in your result, and continue.',
 	'- The skills mounted below are your operating guidance. Explicit instructions in the task brief take priority, and learned patterns never expand your autonomy, permissions, tools, or scope.',
-	'- Always finish by following the emit-result contract exactly: one typed action, a short label, and an evidence pack, ending your final message with the single machine-readable result block.',
+	'- Always finish by following the emit-result contract exactly, ending your final message with the single machine-readable result block. The block always carries an evidence pack (the one-sentence consequence, the two to three claims you verified with receipts, and one honest "Not verified" gap line). A typed action is optional: include action_type/payload/label only when a single catalog action fully fits and you can populate its entire required payload from what you actually verified. If not, omit action_type/payload/label and put your recommendation or blocker in decisionSentence -- an evidence-only result is valid and is preferred over a malformed action, which the host rejects outright.',
 ].join('\n');
 
 /**
@@ -56,7 +56,7 @@ export const WORKER_FINALIZE_PROMPT = [
 	'Finalize now - do not investigate further and do not ask any questions.',
 	'Based only on what you have already established this session, end your reply with your emit-result: a single fenced code block tagged `inbox-one-result` containing one JSON object per the mounted emit-result contract (action_type, payload, label, decisionSentence, claims[], gapLine).',
 	'Lead with the consequence in decisionSentence, include the two or three claims you actually verified with their receipts, and give one honest gapLine of what you did not verify.',
-	'If you cannot recommend an action, omit action_type/payload/label and report the blocker in decisionSentence with the single recovery step. Output the block as the last thing in your message.',
+	'Only include action_type/payload/label when a single catalog action fully fits and you can populate its entire required payload from what you verified; otherwise omit them and put your recommendation or the blocker (with the single recovery step) in decisionSentence -- an evidence-only result is valid. Output the block as the last thing in your message.',
 ].join('\n');
 
 /** Human-legible label for the event subject a worker is dispatched for. */
@@ -165,10 +165,10 @@ export function buildWorkerBrief(role: WorkerRole, task: ILogicalTask): string {
 		'- Lead your result with the single most important consequence for the human, in one sentence.',
 		'- Provide two to three claims, each naming a concrete quantity and its verification method (an exact command, a named CI check and its conclusion, or the files changed with counts), paired with a real receipt link.',
 		'- State exactly one honest "Not verified" line covering the concrete, decision-relevant gap you did not confirm; omit speculative edge cases.',
-		'- Propose exactly one typed action the human can take in a single click, or none if you are reporting a blocker.',
+		'- Propose exactly one typed action the human can take in a single click ONLY when a single catalog action fully fits and you can populate its entire required payload from what you verified; otherwise propose none (an evidence-only result), which is valid and preferred over a malformed action.',
 		'',
 		'## Final step',
-		'As the final step, follow the mounted emit-result skill and produce the structured action, a label of at most three to four words, and the evidence pack, ending your final message with the single `inbox-one-result` JSON block. Do not invent action types or fabricate receipts; the host validates the action against the catalog and rejects anything malformed.',
+		'As the final step, follow the mounted emit-result skill and produce the evidence pack and a label of at most three to four words, ending your final message with the single `inbox-one-result` JSON block. Include a typed action only when you can fully populate its required payload; otherwise omit action_type/payload/label and lead with your recommendation in decisionSentence. Do not invent action types or fabricate receipts; the host validates the action against the catalog and rejects anything malformed, so an evidence-only result is safer than a half-specified action.',
 	];
 	return lines.join('\n');
 }
