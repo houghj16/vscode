@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import product from '../../../../platform/product/common/product.js';
 import { IAutomationStorageService } from '../../automations/common/automationStorageService.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
@@ -15,10 +14,9 @@ import { IInboxOneStore } from '../common/inboxOneStore.js';
 import { IInboxOneSettings } from '../common/inboxOneSettings.js';
 import { IIngressEvent } from '../common/inboxOneTypes.js';
 import { IWorkerDispatcher } from '../common/workerDispatcher.js';
-import { ITranscriptSource, TranscriptWorkerResultReader } from '../common/workerResult.js';
+import { TranscriptWorkerResultReader } from '../common/workerResult.js';
 import { LiveAdmissionManager } from './liveAdmissionManager.js';
-import { isPendingRef, SessionsManagementWorkerDispatcher } from './sessionsManagementWorkerDispatcher.js';
-import { CompositeTranscriptSource, FallbackWorkerDispatcher, SimulatedWorkerDispatcher, SimulatedWorkerRuntime } from './simulatedWorkerDispatcher.js';
+import { SessionsManagementWorkerDispatcher } from './sessionsManagementWorkerDispatcher.js';
 import { WorkbenchTranscriptSource } from './workbenchTranscriptSource.js';
 
 /** MVP: a single personal inbox per user (design 7.7). Multi-inbox/team routing is deferred. */
@@ -51,34 +49,15 @@ export class DiffyCoordinatorService extends Disposable implements IDiffyCoordin
 	) {
 		super();
 		const admission = new LiveAdmissionManager(this.store, this.settings, storage);
-		const isDevBuild = product.quality !== 'stable';
-		// In dev builds the real dispatcher does NOT fall back to the (flakier)
-		// cloud path when the window has no local folder -- it defers, and the
-		// in-window simulator below takes over, so the dev loop is fast and
-		// deterministic without a host. A real dispatch still runs whenever a
-		// usable target exists (e.g. a repo folder is open, so the local agent
-		// host is a valid target). Stable builds keep the real cloud fallback and
-		// never simulate.
-		const realDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher, !isDevBuild);
+		// Worker dispatch reuses the exact session harness the New Session composer
+		// uses (ISessionsManagementService): it creates a real agent session in the
+		// default workspace and sends the brief in the background. No bespoke folder
+		// resolution and no simulation -- if the composer can start a session here,
+		// so can Diffy.
+		const dispatcher: IWorkerDispatcher = instantiationService.createInstance(SessionsManagementWorkerDispatcher);
 		// Reads a finished worker session's final message from the chat model, so
-		// `task_finished` produces real evidence with a connected host.
-		const workbenchSource = instantiationService.createInstance(WorkbenchTranscriptSource);
-
-		let dispatcher: IWorkerDispatcher = realDispatcher;
-		let transcriptSource: ITranscriptSource = workbenchSource;
-		// Dev builds fall back to an in-window worker simulator when no host target
-		// is available, so the full production loop (dispatch -> run -> emit-result
-		// -> host-validate -> host-rank -> land) is exercised headless with real,
-		// non-hardcoded evidence. Never wired in stable builds, so simulated
-		// evidence can never reach production.
-		if (isDevBuild) {
-			const runtime = this._register(new SimulatedWorkerRuntime(this.ingress, this.logService));
-			const simulated = new SimulatedWorkerDispatcher(runtime);
-			dispatcher = new FallbackWorkerDispatcher(realDispatcher, simulated, this.logService, isPendingRef);
-			transcriptSource = new CompositeTranscriptSource([runtime, workbenchSource]);
-		}
-
-		const resultReader = new TranscriptWorkerResultReader(transcriptSource);
+		// `task_finished` produces real evidence.
+		const resultReader = new TranscriptWorkerResultReader(instantiationService.createInstance(WorkbenchTranscriptSource));
 		this.engine = new CoordinatorEngine(this.inboxId, this.store, this.settings, admission, dispatcher, this.logService, undefined, resultReader);
 
 		this.ready = this.settings.initialize();

@@ -6,14 +6,13 @@
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
-import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import { buildDistillerBrief, parseProposedSkill, simulateDistillerProposal } from '../common/distillerBrief.js';
+import { buildDistillerBrief, parseProposedSkill } from '../common/distillerBrief.js';
 import { IInboxOneFileStore, IStoredSkill } from '../common/inboxOneFileStore.js';
 import { IExperienceRecord, LearningTarget } from '../common/learningLoop.js';
 import { mapSessionStatusToEventType } from '../common/sessionEventMapping.js';
+import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 
 /** Reconstructs an on-disk SKILL.md (frontmatter + body) so the distiller sees the full skill. */
 function reconstructSkill(skill: IStoredSkill): string {
@@ -30,24 +29,22 @@ function reconstructSkill(skill: IStoredSkill): string {
 
 /**
  * The real semantic half of the learning loop (design 6.2): the `distillOne` hook
- * that dispatches a stock distiller AGENT session per resolution. It briefs the
- * session with the experience + current role skill, and when the session
- * completes reads its proposed SKILL.md from the chat model and applies it as a
- * new, versioned, rollbackable skill on the host. Deterministic consolidation
- * (wiki log + skill-impact) already ran in the orchestrator; this adds the model
- * authorship.
+ * that dispatches a stock distiller AGENT session per resolution through the
+ * central {@link IInboxOneSessionLauncher} (the same seam worker dispatch uses).
+ * It briefs the session with the experience + current role skill, and when the
+ * session completes reads its proposed SKILL.md from the chat model and applies
+ * it as a new, versioned, rollbackable skill on the host. Deterministic
+ * consolidation (wiki log + skill-impact) already ran in the orchestrator; this
+ * adds the model authorship.
  *
- * Degrades gracefully with no connected host: dispatch defers (no session), so
- * nothing is written -- the deterministic ledger still advances.
+ * Degrades gracefully when no session target is available: the launch returns
+ * undefined, so nothing is written -- the deterministic ledger still advances.
  */
 export class DistillerSessionDispatcher extends Disposable {
 
 	constructor(
-		/** Dev builds fall back to an in-window simulated distiller when no host is connected. */
-		private readonly simulateWhenNoHost: boolean,
-		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
+		@IInboxOneSessionLauncher private readonly launcher: IInboxOneSessionLauncher,
 		@IInboxOneFileStore private readonly fileStore: IInboxOneFileStore,
-		@IWorkspaceContextService private readonly workspaceContext: IWorkspaceContextService,
 		@IChatService private readonly chatService: IChatService,
 		@ILogService private readonly logService: ILogService,
 	) {
@@ -58,50 +55,16 @@ export class DistillerSessionDispatcher extends Disposable {
 	readonly distill = async (record: IExperienceRecord, target: LearningTarget): Promise<void> => {
 		// The role's own (non-framework) skill is the update target.
 		const skill = record.role ? (await this.fileStore.listSkills()).find(s => !s.isFramework && s.frontmatter.roles.includes(record.role!)) : undefined;
-		const folder = this.workspaceContext.getWorkspace().folders[0]?.uri;
-		if (!folder || !this.sessions.isNewSessionTargetAvailable(folder)) {
-			await this.distillSimulated(record, target, skill);
-			return;
-		}
 		const brief = buildDistillerBrief(record, target, skill ? reconstructSkill(skill) : undefined);
-		try {
-			const session = await this.sessions.createAndSendNewChatRequest(
-				folder,
-				{ query: brief, title: 'Diffy distiller', background: true },
-				{ metadata: { inboxOneDistiller: record.resolutionId } },
-			);
-			if (session && skill) {
-				this.applyOnComplete(session, skill.frontmatter.id);
-			}
-		} catch (err) {
-			this.logService.warn(`[inboxOne] distiller dispatch failed: ${err instanceof Error ? err.message : String(err)}`);
+		const session = await this.launcher.launch(brief, {
+			title: 'Diffy distiller',
+			activity: 'distiller',
+			metadata: { inboxOneDistiller: record.resolutionId },
+		});
+		if (session && skill) {
+			this.applyOnComplete(session, skill.frontmatter.id);
 		}
 	};
-
-	/**
-	 * The headless learning path (dev builds, no host): stand in for the distiller
-	 * agent by folding the resolved lesson into the skill and writing a new
-	 * version through the same host {@link IInboxOneFileStore.writeSkill} path, so
-	 * the learning loop is fully exercised and the skill visibly evolves. A no-op
-	 * (deferral) in stable builds or when there is no skill to evolve.
-	 */
-	private async distillSimulated(record: IExperienceRecord, target: LearningTarget, skill: IStoredSkill | undefined): Promise<void> {
-		if (!this.simulateWhenNoHost || !skill) {
-			this.logService.trace('[inboxOne] distiller deferred (no connected agent host)');
-			return;
-		}
-		const proposed = simulateDistillerProposal(record, target, reconstructSkill(skill));
-		if (!proposed) {
-			this.logService.trace(`[inboxOne] (sim) distiller proposed no change to ${skill.frontmatter.id}`);
-			return;
-		}
-		try {
-			await this.fileStore.writeSkill(skill.frontmatter.id, proposed);
-			this.logService.info(`[inboxOne] (sim) distiller updated skill ${skill.frontmatter.id} (new version)`);
-		} catch (err) {
-			this.logService.warn(`[inboxOne] (sim) distiller write failed: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	}
 
 	/** One-shot: when the distiller session finishes, read + apply its proposed skill. */
 	private applyOnComplete(session: ISession, skillId: string): void {

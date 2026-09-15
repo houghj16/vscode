@@ -7,51 +7,37 @@ import assert from 'assert';
 import { constObservable } from '../../../../../base/common/observable.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { NullLogService } from '../../../../../platform/log/common/log.js';
-import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { ISession } from '../../../../services/sessions/common/session.js';
-import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { WorkerRole } from '../../common/eventTaxonomy.js';
 import { IInboxOneFileStore } from '../../common/inboxOneFileStore.js';
 import { IMountResult } from '../../common/roleMount.js';
 import { EventSource, ILogicalTask, LogicalTaskState } from '../../common/inboxOneTypes.js';
 import { IWorkerDispatchRequest } from '../../common/workerDispatcher.js';
 import { WORKER_OPERATING_ENVELOPE } from '../../common/workerBrief.js';
+import { ILaunchOptions, IInboxOneSessionLauncher } from '../../browser/inboxOneSessionLauncher.js';
 import { INBOX_ONE_SESSION_META, SessionsManagementWorkerDispatcher } from '../../browser/sessionsManagementWorkerDispatcher.js';
 
 function fakeSession(ref: string): ISession {
 	return { resource: URI.parse(ref), mainChat: constObservable({} as never) } as unknown as ISession;
 }
 
-interface IRecordedCreate {
-	folder: URI;
-	query: string;
-	title?: string;
-	metadata?: Record<string, unknown>;
-}
-
-class FakeSessions {
-	targetAvailable = true;
-	created: IRecordedCreate[] = [];
-	relayed: Array<{ ref: string; query: string }> = [];
-	sessionsByRef = new Map<string, ISession>();
-	createResult: ISession | undefined;
-
-	isNewSessionTargetAvailable(): boolean { return this.targetAvailable; }
-	getSessionTypesForFolder(): [] { return []; }
-	async createAndSendNewChatRequest(folder: URI, options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown> }): Promise<ISession | undefined> {
-		this.created.push({ folder, query: options.query, title: options.title, metadata: createOptions?.metadata });
-		return this.createResult;
+/** Central launcher stand-in: records launches/relays so the test asserts what the dispatcher routes through it. */
+class FakeLauncher {
+	readonly launched: Array<{ firstMessage: string; options: ILaunchOptions }> = [];
+	readonly relayed: Array<{ sessionRef: string; message: string }> = [];
+	launchResult: ISession | undefined;
+	relayResult = false;
+	canLaunch(): boolean { return this.launchResult !== undefined; }
+	async launch(firstMessage: string, options: ILaunchOptions): Promise<ISession | undefined> {
+		this.launched.push({ firstMessage, options });
+		return this.launchResult;
 	}
-	getSession(uri: URI): ISession | undefined { return this.sessionsByRef.get(uri.toString()); }
-	async sendRequest(session: ISession, _chat: unknown, options: { query: string }): Promise<void> {
-		this.relayed.push({ ref: session.resource.toString(), query: options.query });
+	async relay(sessionRef: string, message: string): Promise<boolean> {
+		this.relayed.push({ sessionRef, message });
+		return this.relayResult;
 	}
-	asService(): ISessionsManagementService { return this as unknown as ISessionsManagementService; }
-}
-
-function fakeWorkspace(folder: URI | undefined): IWorkspaceContextService {
-	return { getWorkspace: () => ({ folders: folder ? [{ uri: folder }] : [] }) } as unknown as IWorkspaceContextService;
+	asService(): IInboxOneSessionLauncher { return this as unknown as IInboxOneSessionLauncher; }
 }
 
 /** Fake file store whose `mountRoles` returns a recognizable persona so the test can assert the harness mounts it. */
@@ -85,139 +71,94 @@ suite('Inbox One - SessionsManagementWorkerDispatcher', () => {
 
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	function make(sessions: FakeSessions, folder: URI | undefined, fileStore: FakeFileStore = new FakeFileStore(), allowCloudFallback: boolean = true) {
-		return new SessionsManagementWorkerDispatcher(allowCloudFallback, sessions.asService(), fakeWorkspace(folder), fileStore.asService(), disposables.add(new NullLogService()));
+	function make(launcher: FakeLauncher, fileStore: FakeFileStore = new FakeFileStore()) {
+		return new SessionsManagementWorkerDispatcher(launcher.asService(), fileStore.asService(), disposables.add(new NullLogService()));
 	}
 
-	test('creates a real worker session and returns its resource ref', async () => {
-		const sessions = new FakeSessions();
-		sessions.createResult = fakeSession('agent-host-session://acme/worker-1');
+	test('routes the composed first message + metadata through the central launcher', async () => {
+		const launcher = new FakeLauncher();
+		launcher.launchResult = fakeSession('agent-host-session://acme/worker-1');
 		const fileStore = new FakeFileStore();
-		const dispatcher = make(sessions, URI.file('/repo'), fileStore);
+		const dispatcher = make(launcher, fileStore);
 
 		const result = await dispatcher.dispatch(request());
 
 		assert.strictEqual(result.reused, false);
 		assert.strictEqual(result.sessionRef, 'agent-host-session://acme/worker-1');
-		assert.strictEqual(sessions.created.length, 1);
-		// The harness composes the first message from the fixed operating envelope,
-		// the mounted skills persona (mountRoles for the role), and the brief.
-		const query = sessions.created[0].query;
-		assert.ok(query.includes(WORKER_OPERATING_ENVELOPE), 'includes the operating envelope');
-		assert.ok(query.includes('Review consequence, not formatting.'), 'includes the mounted role persona');
-		assert.ok(query.includes('Review PR #842. Emit a decision-ready result.'), 'includes the task brief');
+		assert.strictEqual(launcher.launched.length, 1);
+		// The harness composes the first message from the operating envelope, the
+		// mounted skills persona (mountRoles for the role), and the brief.
+		const message = launcher.launched[0].firstMessage;
+		assert.ok(message.includes(WORKER_OPERATING_ENVELOPE), 'includes the operating envelope');
+		assert.ok(message.includes('Review consequence, not formatting.'), 'includes the mounted role persona');
+		assert.ok(message.includes('Review PR #842. Emit a decision-ready result.'), 'includes the task brief');
 		assert.deepStrictEqual(fileStore.mountedRoles, [[WorkerRole.CodeReview]], 'mounts skills for the dispatched role');
-		// Metadata stamps the task/role so lifecycle events resolve back (G15).
-		assert.strictEqual(sessions.created[0].metadata![INBOX_ONE_SESSION_META.role], WorkerRole.CodeReview);
-		assert.strictEqual(sessions.created[0].metadata![INBOX_ONE_SESSION_META.taskId], 'task-1');
+		// Task-routing metadata so lifecycle events resolve back (G15).
+		assert.strictEqual(launcher.launched[0].options.metadata![INBOX_ONE_SESSION_META.role], WorkerRole.CodeReview);
+		assert.strictEqual(launcher.launched[0].options.metadata![INBOX_ONE_SESSION_META.taskId], 'task-1');
 	});
 
 	test('degrades to a persona-less first message when the file store fails', async () => {
-		const sessions = new FakeSessions();
-		sessions.createResult = fakeSession('agent-host-session://acme/worker-1');
+		const launcher = new FakeLauncher();
+		launcher.launchResult = fakeSession('agent-host-session://acme/worker-1');
 		const fileStore = new FakeFileStore();
 		fileStore.failMount = true;
-		const dispatcher = make(sessions, URI.file('/repo'), fileStore);
+		const dispatcher = make(launcher, fileStore);
 
-		const result = await dispatcher.dispatch(request());
+		await dispatcher.dispatch(request());
 
-		assert.strictEqual(result.reused, false);
-		assert.strictEqual(sessions.created.length, 1);
-		const query = sessions.created[0].query;
-		assert.ok(query.includes(WORKER_OPERATING_ENVELOPE), 'still includes the operating envelope');
-		assert.ok(query.includes('Review PR #842. Emit a decision-ready result.'), 'the self-contained brief still stands');
-		assert.ok(!query.includes('Review consequence, not formatting.'), 'no persona when mounting fails');
+		const message = launcher.launched[0].firstMessage;
+		assert.ok(message.includes(WORKER_OPERATING_ENVELOPE), 'still includes the operating envelope');
+		assert.ok(message.includes('Review PR #842. Emit a decision-ready result.'), 'the self-contained brief still stands');
+		assert.ok(!message.includes('Review consequence, not formatting.'), 'no persona when mounting fails');
 	});
 
-	test('defers gracefully when no session target is available (no host)', async () => {
-		const sessions = new FakeSessions();
-		sessions.targetAvailable = false;
-		const dispatcher = make(sessions, URI.file('/repo'));
+	test('defers gracefully when the launcher has no session target', async () => {
+		const launcher = new FakeLauncher(); // launchResult undefined -> no target
+		const dispatcher = make(launcher);
 
 		const result = await dispatcher.dispatch(request());
 
-		assert.strictEqual(sessions.created.length, 0, 'no session is created without a host');
+		assert.strictEqual(launcher.launched.length, 1, 'the launch was attempted');
 		assert.ok(result.sessionRef.startsWith('inboxone-pending://'), 'returns a pending ref so the loop continues');
+		assert.strictEqual(result.deferred, true, 'marks the dispatch deferred so admission is released');
 		assert.strictEqual(result.reused, false);
 	});
 
-	test('targets the repo as a github-remote (cloud) workspace when there is no local folder', async () => {
-		const sessions = new FakeSessions();
-		sessions.createResult = fakeSession('agent-host-session://cloud/worker-1');
-		const dispatcher = make(sessions, undefined);
-
-		const result = await dispatcher.dispatch(request());
-
-		// No local folder in the sessions window: dispatch a cloud worker against
-		// the task's repo (derived from the group key), so any enrolled repo can be
-		// worked without a local clone.
-		assert.strictEqual(sessions.created.length, 1);
-		assert.strictEqual(sessions.created[0].folder.scheme, 'github-remote-file');
-		assert.ok(sessions.created[0].folder.path.includes('acme/api'));
-		assert.strictEqual(result.sessionRef, 'agent-host-session://cloud/worker-1');
-	});
-
-	test('defers (for the simulator) instead of cloud when cloud fallback is disabled (dev)', async () => {
-		const sessions = new FakeSessions();
-		sessions.createResult = fakeSession('agent-host-session://cloud/worker-1');
-		const dispatcher = make(sessions, undefined, new FakeFileStore(), /*allowCloudFallback*/ false);
-
-		const result = await dispatcher.dispatch(request());
-
-		assert.strictEqual(sessions.created.length, 0, 'no cloud session is attempted');
-		assert.ok(result.sessionRef.startsWith('inboxone-pending://'));
-		assert.strictEqual(result.deferred, true, 'signals deferral so the coordinator releases admission and the simulator takes over');
-	});
-
-	test('defers when there is neither a local folder nor a repo to target', async () => {
-		const sessions = new FakeSessions();
-		const dispatcher = make(sessions, undefined);
-		const result = await dispatcher.dispatch(request({ groupKey: 'no-key' as never, task: { ...task(), repo: undefined, groupKey: 'no-key' } as ILogicalTask }));
-		assert.strictEqual(sessions.created.length, 0);
-		assert.ok(result.sessionRef.startsWith('inboxone-pending://'));
-	});
-
-	test('reuses a warm session by relaying the new brief', async () => {
-		const sessions = new FakeSessions();
+	test('reuses a warm session by relaying the new brief through the launcher', async () => {
+		const launcher = new FakeLauncher();
+		launcher.relayResult = true;
 		const ref = 'agent-host-session://acme/worker-1';
-		sessions.sessionsByRef.set(ref, fakeSession(ref));
-		const dispatcher = make(sessions, URI.file('/repo'));
+		const dispatcher = make(launcher);
 
 		const result = await dispatcher.dispatch(request({ reuseSessionRef: ref, brief: 'Also address the flaky test.' }));
 
 		assert.strictEqual(result.reused, true);
 		assert.strictEqual(result.sessionRef, ref);
-		assert.strictEqual(sessions.created.length, 0, 'reuse does not create a new session');
-		assert.deepStrictEqual(sessions.relayed, [{ ref, query: 'Also address the flaky test.' }]);
+		assert.strictEqual(launcher.launched.length, 0, 'reuse does not launch a new session');
+		assert.deepStrictEqual(launcher.relayed, [{ sessionRef: ref, message: 'Also address the flaky test.' }]);
 	});
 
-	test('falls back to a fresh session when the warm session is gone', async () => {
-		const sessions = new FakeSessions();
-		sessions.createResult = fakeSession('agent-host-session://acme/worker-2');
-		const dispatcher = make(sessions, URI.file('/repo'));
+	test('falls back to a fresh launch when the warm session relay fails', async () => {
+		const launcher = new FakeLauncher();
+		launcher.relayResult = false; // warm session gone
+		launcher.launchResult = fakeSession('agent-host-session://acme/worker-2');
+		const dispatcher = make(launcher);
 
 		const result = await dispatcher.dispatch(request({ reuseSessionRef: 'agent-host-session://acme/missing' }));
 
 		assert.strictEqual(result.reused, false);
 		assert.strictEqual(result.sessionRef, 'agent-host-session://acme/worker-2');
-		assert.strictEqual(sessions.created.length, 1);
+		assert.strictEqual(launcher.launched.length, 1);
 	});
 
-	test('relay sends a request into the existing session', async () => {
-		const sessions = new FakeSessions();
-		const ref = 'agent-host-session://acme/worker-1';
-		sessions.sessionsByRef.set(ref, fakeSession(ref));
-		const dispatcher = make(sessions, URI.file('/repo'));
+	test('relay delegates to the launcher', async () => {
+		const launcher = new FakeLauncher();
+		launcher.relayResult = true;
+		const dispatcher = make(launcher);
 
-		await dispatcher.relay(ref, 'Please also update the changelog.');
+		await dispatcher.relay('agent-host-session://acme/worker-1', 'Please also update the changelog.');
 
-		assert.deepStrictEqual(sessions.relayed, [{ ref, query: 'Please also update the changelog.' }]);
-	});
-
-	test('relay to a pending ref is a safe no-op', async () => {
-		const sessions = new FakeSessions();
-		const dispatcher = make(sessions, URI.file('/repo'));
-		await dispatcher.relay('inboxone-pending://worker/abc', 'hi');
-		assert.strictEqual(sessions.relayed.length, 0);
+		assert.deepStrictEqual(launcher.relayed, [{ sessionRef: 'agent-host-session://acme/worker-1', message: 'Please also update the changelog.' }]);
 	});
 });
