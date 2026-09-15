@@ -81,9 +81,15 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 		// so they must not stall on tool-approval prompts: mount them at Autopilot
 		// (auto-approve every tool call, auto-retry, and keep going until the task
 		// is done). This is the same permission level Automations use for unattended
-		// runs -- no bespoke approval handling, just the standard session config.
+		// runs. We seed it two ways so it lands whichever provider hosts the session:
+		// `permissionLevel` for providers that implement setPermissionLevel (e.g. the
+		// cloud coding agent), and `automationConfiguration` for the agent host
+		// (Copilot CLI), which seeds its initial session config from it -- no bespoke
+		// approval handling, just the standard unattended-session config.
+		const autopilot = ChatPermissionLevel.Autopilot;
 		const createOptions: ICreateNewSessionOptions = {
-			permissionLevel: ChatPermissionLevel.Autopilot,
+			permissionLevel: autopilot,
+			automationConfiguration: { permissionLevel: autopilot },
 			...(options.metadata ? { metadata: options.metadata } : {}),
 		};
 		const folder = this.resolveDefaultFolder();

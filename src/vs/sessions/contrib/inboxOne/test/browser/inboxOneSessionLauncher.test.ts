@@ -22,19 +22,19 @@ class FakeSessions {
 	/** URIs that can host a session. */
 	servable = new Set<string>();
 	quickChatAvailable = false;
-	created: Array<{ folder: URI | undefined; query: string; title?: string; metadata?: Record<string, unknown>; permissionLevel?: string }> = [];
+	created: Array<{ folder: URI | undefined; query: string; title?: string; metadata?: Record<string, unknown>; permissionLevel?: string; autopilotConfig?: string }> = [];
 	relayed: Array<{ ref: string; query: string }> = [];
 	sessionsByRef = new Map<string, ISession>();
 	createResult: ISession | undefined;
 
 	isNewSessionTargetAvailable(folder: URI): boolean { return this.servable.has(folder.toString()); }
 	isQuickChatTargetAvailable(): boolean { return this.quickChatAvailable; }
-	async createAndSendNewChatRequest(folder: URI, options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; permissionLevel?: string }): Promise<ISession | undefined> {
-		this.created.push({ folder, query: options.query, title: options.title, metadata: createOptions?.metadata, permissionLevel: createOptions?.permissionLevel });
+	async createAndSendNewChatRequest(folder: URI, options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; permissionLevel?: string; automationConfiguration?: { permissionLevel?: string } }): Promise<ISession | undefined> {
+		this.created.push({ folder, query: options.query, title: options.title, metadata: createOptions?.metadata, permissionLevel: createOptions?.permissionLevel, autopilotConfig: createOptions?.automationConfiguration?.permissionLevel });
 		return this.createResult;
 	}
-	async createAndSendQuickChatRequest(options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; permissionLevel?: string }): Promise<ISession | undefined> {
-		this.created.push({ folder: undefined, query: options.query, title: options.title, metadata: createOptions?.metadata, permissionLevel: createOptions?.permissionLevel });
+	async createAndSendQuickChatRequest(options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown>; permissionLevel?: string; automationConfiguration?: { permissionLevel?: string } }): Promise<ISession | undefined> {
+		this.created.push({ folder: undefined, query: options.query, title: options.title, metadata: createOptions?.metadata, permissionLevel: createOptions?.permissionLevel, autopilotConfig: createOptions?.automationConfiguration?.permissionLevel });
 		return this.createResult;
 	}
 	getSession(uri: URI): ISession | undefined { return this.sessionsByRef.get(uri.toString()); }
@@ -77,6 +77,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		assert.strictEqual(sessions.created[0].query, 'hello');
 		assert.strictEqual(sessions.created[0].metadata!.a, 1);
 		assert.strictEqual(sessions.created[0].permissionLevel, 'autopilot', 'ambient sessions run at autopilot (auto-approve tools)');
+		assert.strictEqual(sessions.created[0].autopilotConfig, 'autopilot', 'autopilot is also seeded via automationConfiguration for the agent host');
 	});
 
 	test('falls back to the most-recent workspace that can host a session (composer default)', async () => {
