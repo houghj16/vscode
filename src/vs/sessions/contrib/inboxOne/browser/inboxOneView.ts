@@ -33,9 +33,6 @@ const DIFFY_SELECTION = '__diffy__';
 /** Storage key for the persisted set of collapsed section keys. */
 const COLLAPSED_SECTIONS_KEY = 'inboxOne.collapsedSections';
 
-/** Fallback word cap for a list title derived from decisionSentence when a worker did not author one. */
-const LIST_TITLE_WORDS = 6;
-
 /** The inbox sections in display order (design 3.1). */
 const SECTIONS: readonly ITierSpec[] = [
 	{ key: 'critical', label: localize('inboxOne.critical', 'CRITICAL'), match: t => t.state === LogicalTaskState.Decision && t.tier === InboxOneTier.Critical },
@@ -625,22 +622,12 @@ export class InboxOneView extends AbstractCustomView {
 	}
 
 	/**
-	 * The short, scannable inbox list title: the worker-authored headline when
-	 * present, else the first {@link LIST_TITLE_WORDS} words of the fuller
-	 * decisionSentence (which stays the first summary line of the expanded detail),
-	 * else the generic subject fallback.
+	 * The inbox list title: the worker-authored, self-contained headline when
+	 * present, else the generic subject fallback. We never derive it by truncating
+	 * decisionSentence -- a prefix of the recommendation is not a real title.
 	 */
 	private listTitle(task: ILogicalTask): string {
-		const authored = task.evidence?.title?.trim();
-		if (authored) {
-			return authored;
-		}
-		const decision = task.evidence?.decisionSentence?.trim();
-		if (decision) {
-			const words = decision.split(/\s+/).filter(Boolean);
-			return words.length <= LIST_TITLE_WORDS ? decision : words.slice(0, LIST_TITLE_WORDS).join(' ') + '...';
-		}
-		return this.fallbackTitle(task);
+		return task.evidence?.title?.trim() || this.fallbackTitle(task);
 	}
 
 	private stateLabel(state: LogicalTaskState): string {

@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { ACTION_CATALOG, isKnownActionType, Reversibility, validateAction } from '../../common/actionCatalog.js';
+import { ACTION_CATALOG, describeActionCatalog, isKnownActionType, Reversibility, validateAction } from '../../common/actionCatalog.js';
 import { buildConfirmation } from '../../common/actionConfirmation.js';
 import { ActionType } from '../../common/inboxOneTypes.js';
 
@@ -75,6 +75,17 @@ suite('Inbox One - action catalog', () => {
 	test('non-object payloads are rejected', () => {
 		assert.strictEqual(validateAction(ActionType.MergePr, null).valid, false);
 		assert.strictEqual(validateAction(ActionType.MergePr, 'string').valid, false);
+	});
+
+	test('describeActionCatalog lists every action and the finite value sets for the prompt', () => {
+		const text = describeActionCatalog();
+		for (const key of Object.keys(ACTION_CATALOG) as ActionType[]) {
+			assert.ok(text.includes(key), `catalog description must mention ${key}`);
+		}
+		// The merge strategy is a finite value set and must be spelled out so the worker fills it correctly.
+		assert.ok(text.includes('"merge" | "squash" | "rebase"'), 'lists the merge strategy enum');
+		// Structured payload requirements the worker previously got wrong (add_labels).
+		assert.ok(/add:\s*string\[\]/.test(text), 'lists add_labels.add as a string array');
 	});
 });
 

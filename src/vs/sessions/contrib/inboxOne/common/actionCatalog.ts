@@ -144,9 +144,9 @@ export const ACTION_CATALOG: { readonly [K in ActionType]: IActionCatalogEntry }
 			const e: string[] = [];
 			if (!isObj(p)) { return ['payload must be an object']; }
 			reqString(p, 'repo', e);
-			const issues = p['issues'];
+			const issues = p.issues;
 			if (!Array.isArray(issues) || issues.length === 0) { e.push('issues must be a non-empty array'); }
-			else { issues.forEach((it, i) => { if (!isObj(it) || typeof it['title'] !== 'string' || (it['title'] as string).length === 0) { e.push(`issues[${i}].title must be a non-empty string`); } }); }
+			else { issues.forEach((it, i) => { if (!isObj(it) || typeof it.title !== 'string' || (it.title as string).length === 0) { e.push(`issues[${i}].title must be a non-empty string`); } }); }
 			return e;
 		},
 	},
@@ -189,4 +189,34 @@ export function validateAction(actionType: string, payload: unknown): IValidatio
 
 export function catalogEntry(actionType: ActionType): IActionCatalogEntry {
 	return ACTION_CATALOG[actionType];
+}
+
+/**
+ * A worker-facing payload spec per action: the exact fields, their types, and any
+ * finite value set (e.g. the merge strategy enum). Kept beside the validators so
+ * the two stay in step; {@link describeActionCatalog} renders it into the worker
+ * brief so a proposed action's payload is well-formed the first time (preempting
+ * malformed-payload rejections like a bad add_labels).
+ */
+const ACTION_PAYLOAD_SPECS: { readonly [K in ActionType]: string } = {
+	[ActionType.MergePr]: 'repo: string, prNumber: number, base: string (target branch), strategy: "merge" | "squash" | "rebase", rerunChecks?: boolean',
+	[ActionType.ApprovePr]: 'repo: string, prNumber: number, body?: string',
+	[ActionType.Comment]: 'repo: string, targetNumber: number (the PR or issue number), body: string',
+	[ActionType.AddLabels]: 'repo: string, targetNumber: number (the PR or issue number), add: string[] (>= 1 label name), remove?: string[]',
+	[ActionType.CreateIssues]: 'repo: string, issues: array (>= 1) of { title: string (required), body?: string, sourceIssues?: number[] }',
+	[ActionType.DispatchFix]: 'repo: string, subject: string (human-legible), parentGroupKey?: string',
+	[ActionType.Deploy]: 'repo: string, env: string, ref: string (sha or artifact id)',
+	[ActionType.GrantScope]: 'repo: string, scope: string',
+};
+
+/**
+ * Renders the fixed action catalog for the worker prompt: every action_type with
+ * its exact payload fields (including finite value sets like the merge strategy)
+ * and reversibility. The worker must choose one action_type and fill its payload
+ * exactly; the host validates against the same catalog.
+ */
+export function describeActionCatalog(): string {
+	return (Object.keys(ACTION_CATALOG) as ActionType[])
+		.map(t => `- ${t} [${ACTION_CATALOG[t].reversibility}]: { ${ACTION_PAYLOAD_SPECS[t]} }`)
+		.join('\n');
 }

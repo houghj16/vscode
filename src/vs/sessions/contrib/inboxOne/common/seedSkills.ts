@@ -24,7 +24,7 @@ export interface ISeedSkillFile {
 
 const EMIT_RESULT = `---
 id: emit-result
-version: 2
+version: 3
 ---
 # Emit result (framework output contract)
 
@@ -37,24 +37,28 @@ these parts:
 
 1. A typed action. Choose exactly one action_type from the fixed catalog:
 merge_pr, approve_pr, comment, add_labels, create_issues, dispatch_fix,
-deploy, grant_scope. Provide a payload that matches that action's schema. Do
-not invent action types or fields; the host validates and rejects anything out
-of catalog.
+deploy, grant_scope. Provide a payload that matches that action's schema exactly
+-- your dispatch brief lists every action's required fields and any finite value
+sets (for example the merge strategy). Include all required fields and use only
+allowed values. Do not invent action types or fields; the host validates and
+rejects anything out of catalog or malformed. If you cannot fully populate a
+payload, propose no action.
 
 2. A short action label. Author a free-form, task-specific button label of at
 most 3-4 words (for example: "Approve PR", "Group issues", "Merge fix"). The
 label is display-only and never changes what executes.
 
-3. A short title. Author a headline of a few words (about 3-6) that names the
-subject and the gist -- this is the one-line entry in the inbox list, so keep it
-scannable (for example: "PR #842 ready to approve", "Group issues #21 & #22").
-The title is NOT the full recommendation; that goes in decisionSentence.
+3. A dedicated title. Author a self-contained few-word headline (about 3-6 words)
+that stands on its own like a subject line -- for example "PR #12 CI bugfix
+complete", "Merge issues relating to cursor bug", "Flaky auth test now passing".
+This is its OWN field and the one-line entry in the inbox list. It is NOT a
+shortened copy or a prefix of decisionSentence; write it as a distinct phrase.
 
 4. An evidence pack. Lead with the consequence in one sentence (decisionSentence
--- the full recommendation shown when the item is opened). Provide 2-3 claims,
-each a short human-legible statement paired with a real receipt link (a run log,
-a diff, a review thread, a test output). End with exactly one honest "Not
-verified" gap line stating what you did not confirm.
+-- the full recommendation shown when the item is opened; do not just restate the
+title). Provide 2-3 claims, each a short human-legible statement paired with a
+real receipt link (a run log, a diff, a review thread, a test output). End with
+exactly one honest "Not verified" gap line stating what you did not confirm.
 
 Ground every claim in a real receipt. Never fabricate a receipt. If you cannot
 produce trustworthy evidence, emit no action and report the blocker instead.

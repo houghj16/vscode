@@ -30,6 +30,11 @@ suite('Inbox One - workerBrief', () => {
 		assert.ok(/## Objective/.test(brief), 'has an objective section');
 		assert.ok(/## Evidence and acceptance/.test(brief), 'has an evidence section');
 		assert.ok(brief.includes('inbox-one-result'), 'ends with the emit-result standing instruction');
+		// Point 1: the finite value sets / payload schemas are supplied so the worker fills actions correctly.
+		assert.ok(/## Action catalog/.test(brief), 'has an action catalog section');
+		assert.ok(brief.includes('merge_pr') && brief.includes('"merge" | "squash" | "rebase"'), 'lists action payloads incl. the strategy enum');
+		// Point 3: title is a dedicated, self-contained field, not a prefix of decisionSentence.
+		assert.ok(/`title`.*self-contained/s.test(brief), 'asks for a dedicated self-contained title');
 	});
 
 	test('each role gets a distinct objective and constraints', () => {

@@ -48,23 +48,17 @@ suite('Inbox One - emit-result validation', () => {
 		}
 	});
 
-	test('carries a short worker-authored title and caps an over-long one', () => {
-		const short = validateWorkerResult(baseEvidence({ title: 'PR #842 ready to approve' }));
+	test('carries the dedicated worker-authored title verbatim (trimmed), or none', () => {
+		const short = validateWorkerResult(baseEvidence({ title: '  PR #842 ready to approve  ' }));
 		assert.strictEqual(short.ok, true);
 		if (short.ok) {
-			assert.strictEqual(short.evidence.title, 'PR #842 ready to approve');
-		}
-
-		const long = validateWorkerResult(baseEvidence({ title: 'one two three four five six seven eight nine' }));
-		assert.strictEqual(long.ok, true);
-		if (long.ok) {
-			assert.strictEqual(long.evidence.title, 'one two three four five six...', 'caps to MAX_TITLE_WORDS');
+			assert.strictEqual(short.evidence.title, 'PR #842 ready to approve', 'trimmed, not truncated');
 		}
 
 		const none = validateWorkerResult(baseEvidence());
 		assert.strictEqual(none.ok, true);
 		if (none.ok) {
-			assert.strictEqual(none.evidence.title, undefined, 'absent title -> undefined (host falls back)');
+			assert.strictEqual(none.evidence.title, undefined, 'absent title -> undefined (host falls back to the subject)');
 		}
 	});
 

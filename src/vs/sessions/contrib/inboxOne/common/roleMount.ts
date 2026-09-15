@@ -72,7 +72,7 @@ export function mountRoles(roleNames: readonly string[], skills: readonly IParse
 	// contract below is inlined in full.
 	if (selected.length) {
 		const refs = selected.map(s => `- ${s.frontmatter.id}: ${skillPurpose(s.body)}`).join('\n');
-		sections.push(`## Your mounted skills\nThese role skills are attached to your session; consult them by name for methodology:\n${refs}`);
+		sections.push(`## Your skills for this task\nFocus on these role skills, attached to your session via your Skills -- open them by name for their full methodology:\n${refs}`);
 		for (const skill of selected) {
 			skillIds.push(skill.frontmatter.id);
 		}

@@ -22,8 +22,6 @@ import { EvidenceRung, IEvidenceClaim, IEvidenceFreshness, IEvidencePack, IPrima
 
 /** Maximum words allowed in a worker-authored action label (design 3.4: <= 3-4 words). */
 export const MAX_LABEL_WORDS = 4;
-/** Maximum words in the worker-authored list title (a short headline, a few words). */
-export const MAX_TITLE_WORDS = 6;
 /** Evidence packs lead with a consequence and carry 2-3 grounded claims (design 3.3). */
 export const MIN_EVIDENCE_CLAIMS = 1;
 export const MAX_EVIDENCE_CLAIMS = 4;
@@ -135,19 +133,16 @@ export function validateWorkerResult(raw: IRawWorkerResult): IEmitResultOutcome 
 }
 
 /**
- * Normalizes a worker-authored list title to a short headline: trims it and, if
- * it runs long, keeps the first {@link MAX_TITLE_WORDS} words so the inbox list
- * title stays a few words (the fuller recommendation lives in decisionSentence).
- * Returns `undefined` when absent so the host falls back to the decisionSentence.
+ * Normalizes a worker-authored list title: trims it. The title is a dedicated,
+ * self-contained field the worker authors as its own short headline (the brief
+ * requires this and forbids a decisionSentence prefix), so the host does not
+ * truncate it. Returns `undefined` when absent, so the host falls back to the
+ * generic subject label rather than a slice of the decisionSentence.
  */
 function shortTitle(raw: string | undefined): string | undefined {
 	if (typeof raw !== 'string') {
 		return undefined;
 	}
 	const trimmed = raw.trim();
-	if (trimmed.length === 0) {
-		return undefined;
-	}
-	const words = trimmed.split(/\s+/).filter(Boolean);
-	return words.length <= MAX_TITLE_WORDS ? trimmed : words.slice(0, MAX_TITLE_WORDS).join(' ') + '...';
+	return trimmed.length === 0 ? undefined : trimmed;
 }

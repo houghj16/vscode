@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { describeActionCatalog } from './actionCatalog.js';
 import { WorkerRole } from './eventTaxonomy.js';
 import { ILogicalTask } from './inboxOneTypes.js';
 
@@ -55,7 +56,7 @@ export const WORKER_OPERATING_ENVELOPE = [
 export const WORKER_FINALIZE_PROMPT = [
 	'Finalize now - do not investigate further and do not ask any questions.',
 	'Based only on what you have already established this session, end your reply with your emit-result: a single fenced code block tagged `inbox-one-result` containing one JSON object per the mounted emit-result contract (action_type, payload, label, title, decisionSentence, claims[], gapLine).',
-	'Lead with the consequence in decisionSentence, include the two or three claims you actually verified with their receipts, and give one honest gapLine of what you did not verify. Also include a short `title` of a few words (a scannable headline naming the subject and gist) -- it is the inbox list entry, distinct from the fuller decisionSentence.',
+	'Lead with the consequence in decisionSentence, include the two or three claims you actually verified with their receipts, and give one honest gapLine of what you did not verify. Also include a dedicated, self-contained `title`: a few-word headline that stands on its own like a subject line (e.g. "PR #12 CI bugfix complete"), NOT a prefix or shortened copy of decisionSentence.',
 	'Only include action_type/payload/label when a single catalog action fully fits and you can populate its entire required payload from what you verified; otherwise omit them and put your recommendation or the blocker (with the single recovery step) in decisionSentence -- an evidence-only result is valid. Output the block as the last thing in your message.',
 ].join('\n');
 
@@ -161,15 +162,19 @@ export function buildWorkerBrief(role: WorkerRole, task: ILogicalTask): string {
 		'## Scope and constraints',
 		...rb.constraints.map(c => `- ${c}`),
 		'',
+		'## Action catalog',
+		'A typed action is OPTIONAL. If you propose one, choose exactly one action_type below and fill its payload exactly: include every required field and use only values from any finite set shown (e.g. a merge strategy). If you cannot fully populate a payload from what you verified, propose no action (an evidence-only result is valid and preferred over a malformed one).',
+		describeActionCatalog(),
+		'',
 		'## Evidence and acceptance',
-		'- Give a short `title` of a few words: a scannable headline naming the subject and gist (it is the inbox list entry). Keep the fuller recommendation for decisionSentence.',
-		'- Lead your result with the single most important consequence for the human, in one sentence (decisionSentence).',
+		'- `title`: a dedicated, self-contained few-word headline that stands on its own like a subject line -- for example "PR #12 CI bugfix complete", "Merge issues relating to cursor bug", "Flaky auth test now passing". It is NOT a shortened copy or prefix of decisionSentence; write it as its own succinct phrase (about 3-6 words). This is the inbox list entry.',
+		'- `decisionSentence`: separately, the single most important consequence/recommendation for the human in one full sentence (the fuller line shown when the item is opened). Do not just restate the title.',
 		'- Provide two to three claims, each naming a concrete quantity and its verification method (an exact command, a named CI check and its conclusion, or the files changed with counts), paired with a real receipt link.',
 		'- State exactly one honest "Not verified" line covering the concrete, decision-relevant gap you did not confirm; omit speculative edge cases.',
-		'- Propose exactly one typed action the human can take in a single click ONLY when a single catalog action fully fits and you can populate its entire required payload from what you verified; otherwise propose none (an evidence-only result), which is valid and preferred over a malformed action.',
+		'- Propose exactly one typed action from the catalog above ONLY when a single action fully fits and you can populate its entire required payload from what you verified; otherwise propose none.',
 		'',
 		'## Final step',
-		'As the final step, follow the mounted emit-result skill and produce the short title, the evidence pack, and a label of at most three to four words, ending your final message with the single `inbox-one-result` JSON block. Include a typed action only when you can fully populate its required payload; otherwise omit action_type/payload/label and lead with your recommendation in decisionSentence. Do not invent action types or fabricate receipts; the host validates the action against the catalog and rejects anything malformed, so an evidence-only result is safer than a half-specified action.',
+		'As the final step, follow the mounted emit-result skill and produce, as separate fields, the dedicated short `title`, the fuller `decisionSentence`, the evidence pack, and a label of at most three to four words, ending your final message with the single `inbox-one-result` JSON block. Include a typed action only when you can fully populate its required payload from the catalog above; otherwise omit action_type/payload/label and lead with your recommendation in decisionSentence. Do not invent action types or fabricate receipts; the host validates the action against the catalog and rejects anything malformed, so an evidence-only result is safer than a half-specified action.',
 	];
 	return lines.join('\n');
 }
