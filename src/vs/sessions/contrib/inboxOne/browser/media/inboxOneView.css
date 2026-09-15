@@ -69,6 +69,13 @@
 	font-size: 18px;
 }
 
+.inbox-one-detail-summary {
+	margin: 0 0 6px 0;
+	font-size: 13px;
+	line-height: 1.4;
+	color: var(--vscode-descriptionForeground);
+}
+
 .inbox-one-detail-sub {
 	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
@@ -136,47 +143,6 @@
 	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
 	font-style: italic;
-}
-
-.inbox-one-whyrank-row {
-	margin: 2px 0 8px 0;
-}
-
-.inbox-one-whyrank-link {
-	background: none;
-	border: none;
-	padding: 0;
-	color: var(--vscode-textLink-foreground);
-	cursor: pointer;
-	font-size: 12px;
-}
-
-.inbox-one-whyrank-link:hover {
-	text-decoration: underline;
-}
-
-.inbox-one-whyrank-pop {
-	margin: 4px 0 10px 0;
-	padding: 10px 12px;
-	border-radius: 8px;
-	border: 1px solid var(--vscode-panel-border, transparent);
-	background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-}
-
-.inbox-one-whyrank-tier {
-	font-size: 12px;
-	margin-bottom: 4px;
-}
-
-.inbox-one-whyrank-reason {
-	font-size: 13px;
-	font-weight: 600;
-	margin-bottom: 8px;
-}
-
-.inbox-one-whyrank-actions {
-	display: flex;
-	gap: 6px;
 }
 
 /* Blocked recovery layout (wireframes 7). */

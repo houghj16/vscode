@@ -18,7 +18,7 @@ import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
-import { ActionType, GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { ActionType, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 import { IInboxOneNavigator } from './inboxOneNavigator.js';
 
@@ -388,13 +388,12 @@ export class InboxOneView extends AbstractCustomView {
 
 		const pack = task.evidence;
 		detail.appendChild($('.inbox-one-detail-tier', undefined, `${(task.tier ?? '').toUpperCase()} - ${task.type}`));
-		detail.appendChild($('h2.inbox-one-detail-title', undefined, pack?.decisionSentence ?? this.fallbackTitle(task)));
+		detail.appendChild($('h2.inbox-one-detail-title', undefined, this.listTitle(task)));
+		if (pack?.decisionSentence) {
+			detail.appendChild($('.inbox-one-detail-summary', undefined, pack.decisionSentence));
+		}
 		if (task.repo) {
 			detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo}${pack?.freshness.headSha ? ' - head ' + pack.freshness.headSha : ''}`));
-		}
-
-		if (task.state === LogicalTaskState.Decision && task.rankReason) {
-			this.renderWhyRank(detail, task);
 		}
 
 		if (pack?.primaryAction) {
@@ -409,7 +408,7 @@ export class InboxOneView extends AbstractCustomView {
 
 		if (pack && pack.claims.length) {
 			const why = detail.appendChild($('.inbox-one-detail-claims'));
-			why.appendChild($('.inbox-one-detail-claims-header', undefined, localize('inboxOne.whyReady', "Why it's ready")));
+			why.appendChild($('.inbox-one-detail-claims-header', undefined, localize('inboxOne.evidence', 'Evidence')));
 			for (const claim of pack.claims) {
 				const claimEl = why.appendChild($('.inbox-one-claim'));
 				claimEl.appendChild($('span.inbox-one-claim-bullet', undefined, '\u2022'));
@@ -453,7 +452,10 @@ export class InboxOneView extends AbstractCustomView {
 		const pack = task.evidence;
 		const subject = task.sourceEvent.subject;
 		detail.appendChild($('.inbox-one-detail-blocked-tier', undefined, `\u0021 ${localize('inboxOne.blockedLabel', 'BLOCKED')} \u00b7 ${task.type}`));
-		detail.appendChild($('h2.inbox-one-detail-title', undefined, pack?.decisionSentence ?? this.fallbackTitle(task)));
+		detail.appendChild($('h2.inbox-one-detail-title', undefined, this.listTitle(task)));
+		if (pack?.decisionSentence) {
+			detail.appendChild($('.inbox-one-detail-summary', undefined, pack.decisionSentence));
+		}
 		detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo ?? ''}${task.repo ? ' \u00b7 ' : ''}${subject.kind} ${subject.id}`));
 
 		const need = detail.appendChild($('.inbox-one-blocked-need'));
@@ -475,42 +477,6 @@ export class InboxOneView extends AbstractCustomView {
 		if (res.task) {
 			this.notificationService.info(localize('inboxOne.unblocked', "Thanks - I'll retry now with that unblocked."));
 		}
-	}
-
-	/**
-	 * The "Why this rank?" affordance (design 3.4 / 7.1, wireframes 13): a plain-
-	 * language explanation of the tier + rank, plus a "Not my area" learning signal
-	 * distinct from Dismiss. No score chrome.
-	 */
-	private renderWhyRank(detail: HTMLElement, task: ILogicalTask): void {
-		const row = detail.appendChild($('.inbox-one-whyrank-row'));
-		const toggle = row.appendChild($('button.inbox-one-whyrank-link', undefined, localize('inboxOne.whyRank', 'Why this rank?')));
-		const pop = detail.appendChild($('.inbox-one-whyrank-pop'));
-		pop.style.display = 'none';
-		pop.appendChild($('.inbox-one-whyrank-tier', undefined, this.tierRationale(task.tier)));
-		pop.appendChild($('.inbox-one-whyrank-reason', undefined, task.rankReason ?? ''));
-		const actions = pop.appendChild($('.inbox-one-whyrank-actions'));
-		const notMine = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.notMyArea', 'Not my area')));
-		this._register(addClick(notMine, () => this.notMyArea(task)));
-		this._register(addClick(toggle, () => {
-			pop.style.display = pop.style.display === 'none' ? 'block' : 'none';
-		}));
-	}
-
-	/** Plain-language rationale for why the task landed in its tier (design 7.1). */
-	private tierRationale(tier: InboxOneTier | undefined): string {
-		switch (tier) {
-			case InboxOneTier.Critical: return localize('inboxOne.tierCriticalWhy', 'Critical: an active incident, reachable security exposure, or a rapidly-expiring high-impact action.');
-			case InboxOneTier.Urgent: return localize('inboxOne.tierUrgentWhy', 'Urgent: a blocking or time-boxed decision that materially affects delivery.');
-			default: return localize('inboxOne.tierFyiWhy', 'FYI: a completed analysis or a safe action, for your awareness.');
-		}
-	}
-
-	/** Records the "Not my area" signal (design 3.4): a rank-lowering DRI hint, then archives quietly. */
-	private async notMyArea(task: ILogicalTask): Promise<void> {
-		await this.store.recordGesture({ taskId: task.id, kind: GestureKind.NotMyArea, timestamp: Date.now() });
-		await this.store.transition(task.id, TaskTrigger.Dismiss, { archiveReason: 'not my area' });
-		this.notificationService.info(localize('inboxOne.notMyAreaAck', "Noted - I'll surface less of this area for you."));
 	}
 
 	/**
