@@ -13,11 +13,13 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { AbstractCustomView } from '../../../services/customView/browser/customView.js';
+import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
 import { ActionType, GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 
 interface ITierSpec {
 	readonly key: string;
@@ -69,6 +71,8 @@ export class InboxOneView extends AbstractCustomView {
 		@IOpenerService private readonly openerService: IOpenerService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IStorageService private readonly storageService: IStorageService,
+		@ISessionsService private readonly sessionsService: ISessionsService,
+		@IInboxOneSessionLauncher private readonly sessionLauncher: IInboxOneSessionLauncher,
 	) {
 		super();
 		for (const key of this.loadCollapsedSections()) {
@@ -223,16 +227,25 @@ export class InboxOneView extends AbstractCustomView {
 		this._register(addKeydown(input, 'Enter', submit));
 	}
 
-	/** The reference-into-Diffy continuation (design 3.6): steer/reopen -> back to Cooking, same task. */
+	/** The reference-into-Diffy continuation (design 3.6, 2.4): steer/reopen -> relay the
+	 * user's instruction into the warm worker session and re-open the task (same session). */
 	private async continueTask(task: ILogicalTask, intent: 'steer' | 'reopen', message: string): Promise<void> {
 		const continuationKey = `${task.id}:${intent}:${Date.now()}`;
 		const trigger = intent === 'reopen' ? TaskTrigger.Reopen : TaskTrigger.Steer;
-		const res = await this.store.openContinuation(task.id, trigger, continuationKey);
+		// Diffy relays the instruction into the SAME worker session (warm context,
+		// technical spec 2.4). Carry the ref into the new attempt so the session
+		// stays owned by the task (Open works, and its next finish re-lands here).
+		const ref = task.attempts[task.currentAttempt]?.sessionRef;
+		const relayable = !!ref && !ref.startsWith('inboxone-pending:') && !ref.startsWith('inboxone-stub:');
+		const relayed = relayable ? await this.sessionLauncher.relay(ref!, message) : false;
+		const res = await this.store.openContinuation(task.id, trigger, continuationKey, undefined, relayed ? { attemptSessionRef: ref } : undefined);
 		if (res.outcome === TransitionOutcome.Applied && !res.fencedNoop) {
 			this.selectedTaskId.set(task.id, undefined);
-			this.notificationService.info(intent === 'reopen'
-				? localize('inboxOne.reopened', 'Diffy reopened this - now Cooking. ({0})', message)
-				: localize('inboxOne.steered', 'Diffy is re-working this with your steer - now Cooking.'));
+			this.notificationService.info(!relayed
+				? localize('inboxOne.continuedNoWorker', 'Diffy re-opened this - now Cooking. (No live worker session to relay into; it will re-dispatch.)')
+				: intent === 'reopen'
+					? localize('inboxOne.reopened', 'Diffy reopened this and sent the worker your note - now Cooking.')
+					: localize('inboxOne.steered', 'Diffy sent your steer to the worker - now Cooking.'));
 		} else {
 			this.notificationService.warn(localize('inboxOne.continueFailed', 'Could not continue this task from its current state.'));
 		}
@@ -495,11 +508,18 @@ export class InboxOneView extends AbstractCustomView {
 			this.notificationService.info(localize('inboxOne.noWorkerYet', "No worker session is available to open yet. If no workspace can host a session here, open one as you would for a New Session and re-run."));
 			return;
 		}
+		let uri: URI;
 		try {
-			void this.openerService.open(URI.parse(ref));
+			uri = URI.parse(ref);
 		} catch {
 			this.notificationService.info(localize('inboxOne.openFailed', "Could not open the worker session."));
+			return;
 		}
+		// Navigate to the session through the sessions service (the same primitive
+		// clicking a session in the list uses), not a generic URI open.
+		void this.sessionsService.openSession(uri).catch(() => {
+			this.notificationService.info(localize('inboxOne.openFailed', "Could not open the worker session."));
+		});
 	}
 
 	/** Steer (design 3.4): item-initiated, Diffy-mediated -> open Diffy scoped to this item. */

@@ -6,6 +6,7 @@
 import { URI } from '../../../../base/common/uri.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ILogicalTask } from '../common/inboxOneTypes.js';
 import { ITranscriptSource } from '../common/workerResult.js';
 
@@ -14,13 +15,19 @@ import { ITranscriptSource } from '../common/workerResult.js';
  * model (technical spec 2.3). The worker follows the baked-in emit-result
  * contract and, as its last step, emits the fenced `inbox-one-result` block; this
  * source returns that final message text so {@link parseWorkerResult} can extract
- * it. This is the host-specific half of the transcript reader -- with a connected
- * agent host and a real worker session, `task_finished` produces real evidence;
- * without a session it returns `undefined` (a safe no-op).
+ * it. This is the host-specific half of the transcript reader -- with a real
+ * worker session, `task_finished` produces real evidence; without one it returns
+ * `undefined` (a safe no-op).
+ *
+ * The stored `sessionRef` is a SESSION resource; the transcript lives on the
+ * session's chat model, keyed by the CHAT resource. We resolve session -> main
+ * chat -> chat model, matching how the rest of the sessions UI reads a
+ * transcript, so it works for any session type (local, agent host, cloud).
  */
 export class WorkbenchTranscriptSource implements ITranscriptSource {
 
 	constructor(
+		@ISessionsManagementService private readonly sessions: ISessionsManagementService,
 		@IChatService private readonly chatService: IChatService,
 		@ILogService private readonly logService: ILogService,
 	) { }
@@ -32,7 +39,12 @@ export class WorkbenchTranscriptSource implements ITranscriptSource {
 		} catch {
 			return undefined;
 		}
-		const model = this.chatService.getSession(uri);
+		const session = this.sessions.getSession(uri);
+		if (!session) {
+			this.logService.trace(`[inboxOne] transcript: no session for ${sessionRef}`);
+			return undefined;
+		}
+		const model = this.chatService.getSession(session.mainChat.get().resource);
 		if (!model) {
 			this.logService.trace(`[inboxOne] transcript: no chat model for ${sessionRef}`);
 			return undefined;
