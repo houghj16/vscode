@@ -45,6 +45,20 @@ export const WORKER_OPERATING_ENVELOPE = [
 	'- Always finish by following the emit-result contract exactly: one typed action, a short label, and an evidence pack, ending your final message with the single machine-readable result block.',
 ].join('\n');
 
+/**
+ * The deterministic follow-up the harness relays when a worker ends a turn with
+ * findings but no parseable emit-result block. Agent sessions frequently stop at
+ * prose after a long investigation; this asks the worker (exactly once per
+ * attempt) to finalize what it already found into the machine-readable block. It
+ * authors no evidence -- the worker still produces the block from its own work.
+ */
+export const WORKER_FINALIZE_PROMPT = [
+	'Finalize now - do not investigate further and do not ask any questions.',
+	'Based only on what you have already established this session, end your reply with your emit-result: a single fenced code block tagged `inbox-one-result` containing one JSON object per the mounted emit-result contract (action_type, payload, label, decisionSentence, claims[], gapLine).',
+	'Lead with the consequence in decisionSentence, include the two or three claims you actually verified with their receipts, and give one honest gapLine of what you did not verify.',
+	'If you cannot recommend an action, omit action_type/payload/label and report the blocker in decisionSentence with the single recovery step. Output the block as the last thing in your message.',
+].join('\n');
+
 /** Human-legible label for the event subject a worker is dispatched for. */
 function describeSubject(task: ILogicalTask): string {
 	const subject = task.sourceEvent.subject;

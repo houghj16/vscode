@@ -16,7 +16,7 @@ import { TaskTrigger } from './inboxOneStateMachine.js';
 import { rank } from './ranking.js';
 import { IWorkerDispatcher } from './workerDispatcher.js';
 import { IWorkerResultReader } from './workerResult.js';
-import { buildWorkerBrief } from './workerBrief.js';
+import { buildWorkerBrief, WORKER_FINALIZE_PROMPT } from './workerBrief.js';
 
 /** Durable admission manager: reserves/releases slots and enforces caps (design 7.4). */
 export interface IAdmissionManager {
@@ -60,6 +60,9 @@ export class CoordinatorEngine {
 		private readonly briefFactory: BriefFactory = DEFAULT_BRIEF,
 		private readonly resultReader?: IWorkerResultReader,
 	) { }
+
+	/** Attempts for which a one-shot finalize relay has already been requested. */
+	private readonly finalizeRequested = new Set<string>();
 
 	/** Processes one normalized ambient event. */
 	async handleEvent(event: IIngressEvent): Promise<void> {
@@ -131,9 +134,11 @@ export class CoordinatorEngine {
 				break;
 			case 'needs_input':
 				// Agent sessions end a TURN (status needs-input / waiting) rather than
-				// "complete". If the worker produced its emit-result this turn, land it;
-				// only when there is no result is it genuinely blocked on the human.
-				if (task.type !== 'conversation' && !await this.tryLandWorkerResult(task)) {
+				// "complete". If the worker produced its emit-result this turn, land it.
+				// Otherwise the worker likely stopped at prose findings: ask it once to
+				// finalize into the emit-result block, and only block when it still
+				// produces nothing after that (or there is no session to relay to).
+				if (task.type !== 'conversation' && !await this.tryLandWorkerResult(task) && !await this.tryRequestFinalize(task)) {
 					await this.store.transition(task.id, TaskTrigger.Blocker, { recoveryStep: 'Worker needs input.' });
 				}
 				break;
@@ -193,6 +198,36 @@ export class CoordinatorEngine {
 		});
 		this.logService.info(`[inboxOne] task ${task.id} landed as ${ranked.tier}: ${ranked.reason}`);
 		return true;
+	}
+
+	/**
+	 * When a worker ends a turn with findings but no parseable emit-result, relays
+	 * the deterministic {@link WORKER_FINALIZE_PROMPT} once per attempt so the
+	 * worker formats what it already found into the machine-readable block. Returns
+	 * whether a finalize relay was sent (the caller keeps the task Cooking on
+	 * `true`; on `false` there was nothing to relay to or it was already asked, so
+	 * the task is genuinely blocked). This authors no evidence.
+	 */
+	private async tryRequestFinalize(task: ILogicalTask): Promise<boolean> {
+		const attempt = currentAttempt(task);
+		const sessionRef = attempt?.sessionRef;
+		if (!sessionRef) {
+			return false;
+		}
+		const key = `${task.id}#${attempt.index}`;
+		if (this.finalizeRequested.has(key)) {
+			return false;
+		}
+		this.finalizeRequested.add(key);
+		try {
+			await this.dispatcher.relay(sessionRef, WORKER_FINALIZE_PROMPT);
+			this.logService.info(`[inboxOne] task ${task.id} asked to finalize its emit-result`);
+			return true;
+		} catch (err) {
+			this.logService.error(`[inboxOne] finalize relay for task ${task.id} failed`, err);
+			this.finalizeRequested.delete(key);
+			return false;
+		}
 	}
 
 	private async dispatchFor(task: ILogicalTask, role: WorkerRole, groupKey: GroupKey): Promise<void> {

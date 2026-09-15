@@ -182,14 +182,24 @@ suite('Inbox One - coordinator engine', () => {
 		assert.ok(task.attempts[0].sessionRef?.startsWith('inboxone-pending://'), 'pending ref recorded');
 	});
 
-	test('a needs_input session event blocks the owning task', async () => {
-		const { store, engine } = build();
+	test('a needs_input turn with no result asks the worker to finalize once, then blocks', async () => {
+		const { store, dispatcher, engine } = build();
 		await engine.handleEvent(prEvent());
 		const task = store.tasks.get()[0];
 		const sessionRef = task.attempts[0].sessionRef!;
 		const sessionId = sessionRef.replace('session://worker/', '');
-		await engine.handleEvent({ deliveryId: 'se1', source: EventSource.Session, sessionId, type: 'needs_input', subject: { kind: 'session', id: sessionId }, receivedAt: 0 });
+		const needsInput = { deliveryId: 'se1', source: EventSource.Session, sessionId, type: 'needs_input' as const, subject: { kind: 'session' as const, id: sessionId }, receivedAt: 0 };
+
+		// First turn-end without a result: ask the worker to finalize (stay Cooking).
+		await engine.handleEvent(needsInput);
+		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Cooking, 'stays cooking after a finalize request');
+		assert.strictEqual(dispatcher.relays.length, 1, 'a single finalize relay was sent');
+		assert.ok(dispatcher.relays[0].message.includes('inbox-one-result'), 'the finalize relay asks for the result block');
+
+		// Still no result after finalize: now it is genuinely blocked on the human.
+		await engine.handleEvent({ ...needsInput, deliveryId: 'se1b' });
 		assert.strictEqual(store.getTask(task.id)!.state, LogicalTaskState.Blocked);
+		assert.strictEqual(dispatcher.relays.length, 1, 'finalize is not relayed twice for one attempt');
 	});
 
 	test('a needs_input turn that already produced a valid result lands a decision, not a block', async () => {
