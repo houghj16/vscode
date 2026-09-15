@@ -491,14 +491,21 @@ export class InboxOneView extends AbstractCustomView {
 	/** Opens the live worker session backing the current attempt (wireframes 6: [ Open ]). */
 	private openWorkerSession(task: ILogicalTask): void {
 		const ref = task.attempts[task.currentAttempt]?.sessionRef;
+		if (ref && ref.startsWith('inboxone-sim:')) {
+			// Dev-build simulator: there is no real session to open. The worker ran
+			// in-window only because this Agents window has no repository folder for
+			// a connected host to run in -- so this is NOT a "no host" situation.
+			this.notificationService.info(localize('inboxOne.simulatedWorker', "This decision came from the in-window simulator because this Agents window has no repository folder open. Open your local clone of the repo here (run 'Chat: New Session in Folder...'), then re-run the task and Diffy will dispatch a real worker to your connected agent host."));
+			return;
+		}
 		if (!ref || ref.startsWith('inboxone-pending:') || ref.startsWith('inboxone-stub:')) {
-			this.notificationService.info(localize('inboxOne.noWorkerYet', 'The worker session is still starting - no host connected yet.'));
+			this.notificationService.info(localize('inboxOne.noWorkerYet', "No worker session is available to open yet. If this Agents window has no repository folder open, open your local clone (run 'Chat: New Session in Folder...') so Diffy can dispatch a real worker to your connected host."));
 			return;
 		}
 		try {
 			void this.openerService.open(URI.parse(ref));
 		} catch {
-			this.notificationService.info(localize('inboxOne.noWorkerYet', 'The worker session is still starting - no host connected yet.'));
+			this.notificationService.info(localize('inboxOne.openFailed', "Could not open the worker session."));
 		}
 	}
 
