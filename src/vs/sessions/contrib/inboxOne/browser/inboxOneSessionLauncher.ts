@@ -27,11 +27,12 @@ export interface ILaunchOptions {
  * messaged (worker dispatch, the learning distiller/curator, and any future
  * ambient session). It adds no runtime of its own: it reuses the exact session
  * harness the New Session composer uses ({@link ISessionsManagementService}),
- * targeting the SAME default workspace the composer would (the sessions window's
- * folder, else the most-recent workspace that can host a session). This keeps
- * every inbox agent call generic -- no per-feature folder resolution, no cloud
- * redirect, no simulation -- so wherever a human could start a New Session, Diffy
- * can start one too.
+ * targeting the SAME default the composer would -- the sessions window's open
+ * folder, else the most-recent workspace that can host a session, else a
+ * workspace-less session (the composer's "Start without a backing workspace"
+ * default). This keeps every inbox agent call generic -- no per-feature folder
+ * resolution, no cloud redirect, no simulation -- so wherever a human could start
+ * a New Session, Diffy can start one too.
  */
 export interface IInboxOneSessionLauncher {
 	readonly _serviceBrand: undefined;
@@ -70,21 +71,26 @@ export class InboxOneSessionLauncher implements IInboxOneSessionLauncher {
 	) { }
 
 	canLaunch(): boolean {
-		return !!this.resolveDefaultFolder();
+		return !!this.resolveDefaultFolder() || this.sessions.isQuickChatTargetAvailable();
 	}
 
 	async launch(firstMessage: string, options: ILaunchOptions): Promise<ISession | undefined> {
+		const request = { query: firstMessage, title: options.title, background: true };
+		const createOptions = options.metadata ? { metadata: options.metadata } : undefined;
 		const folder = this.resolveDefaultFolder();
-		if (!folder) {
-			this.logService.info(`[inboxOne] no session target available to launch ${options.activity} (open a workspace as you would for a New Session)`);
-			return undefined;
-		}
 		try {
-			const session = await this.sessions.createAndSendNewChatRequest(
-				folder,
-				{ query: firstMessage, title: options.title, background: true },
-				options.metadata ? { metadata: options.metadata } : undefined,
-			);
+			let session: ISession | undefined;
+			if (folder) {
+				session = await this.sessions.createAndSendNewChatRequest(folder, request, createOptions);
+			} else if (this.sessions.isQuickChatTargetAvailable()) {
+				// No servable workspace folder: use the composer's "Start without a
+				// backing workspace" default -- a workspace-less session on whatever
+				// target the New Session composer would use here.
+				session = await this.sessions.createAndSendQuickChatRequest(request, createOptions);
+			} else {
+				this.logService.info(`[inboxOne] no session target available to launch ${options.activity} (open a workspace as you would for a New Session)`);
+				return undefined;
+			}
 			if (session) {
 				this.logService.info(`[inboxOne] launched ${options.activity} -> ${session.resource.toString()}`);
 			}

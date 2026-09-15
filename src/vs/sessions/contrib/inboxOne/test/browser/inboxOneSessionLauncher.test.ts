@@ -21,14 +21,20 @@ function fakeSession(ref: string): ISession {
 class FakeSessions {
 	/** URIs that can host a session. */
 	servable = new Set<string>();
-	created: Array<{ folder: URI; query: string; title?: string; metadata?: Record<string, unknown> }> = [];
+	quickChatAvailable = false;
+	created: Array<{ folder: URI | undefined; query: string; title?: string; metadata?: Record<string, unknown> }> = [];
 	relayed: Array<{ ref: string; query: string }> = [];
 	sessionsByRef = new Map<string, ISession>();
 	createResult: ISession | undefined;
 
 	isNewSessionTargetAvailable(folder: URI): boolean { return this.servable.has(folder.toString()); }
+	isQuickChatTargetAvailable(): boolean { return this.quickChatAvailable; }
 	async createAndSendNewChatRequest(folder: URI, options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown> }): Promise<ISession | undefined> {
 		this.created.push({ folder, query: options.query, title: options.title, metadata: createOptions?.metadata });
+		return this.createResult;
+	}
+	async createAndSendQuickChatRequest(options: { query: string; title?: string }, createOptions?: { metadata?: Record<string, unknown> }): Promise<ISession | undefined> {
+		this.created.push({ folder: undefined, query: options.query, title: options.title, metadata: createOptions?.metadata });
 		return this.createResult;
 	}
 	getSession(uri: URI): ISession | undefined { return this.sessionsByRef.get(uri.toString()); }
@@ -67,7 +73,7 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 
 		assert.strictEqual(session?.resource.toString(), 'agent-host-session://worker-1');
 		assert.strictEqual(sessions.created.length, 1);
-		assert.strictEqual(sessions.created[0].folder.toString(), folder.toString());
+		assert.strictEqual(sessions.created[0].folder!.toString(), folder.toString());
 		assert.strictEqual(sessions.created[0].query, 'hello');
 		assert.strictEqual(sessions.created[0].metadata!.a, 1);
 	});
@@ -85,12 +91,27 @@ suite('Inbox One - InboxOneSessionLauncher', () => {
 		const session = await launcher.launch('hi', { title: 'T', activity: 'worker' });
 
 		assert.strictEqual(session?.resource.toString(), 'agent-host-session://worker-2');
-		assert.strictEqual(sessions.created[0].folder.toString(), recent.toString(), 'skips the unservable recent, uses the servable one');
+		assert.strictEqual(sessions.created[0].folder!.toString(), recent.toString(), 'skips the unservable recent, uses the servable one');
 	});
 
-	test('returns undefined (no launch) when no workspace can host a session', async () => {
+	test('falls back to a workspace-less quick chat (composer default) when no folder is servable', async () => {
 		const sessions = new FakeSessions();
-		const launcher = make(sessions, URI.file('/repo'), [URI.file('/recent')]); // nothing marked servable
+		sessions.quickChatAvailable = true; // no servable folder, but a quick-chat target exists
+		sessions.createResult = fakeSession('agent-host-session://quick-1');
+		const launcher = make(sessions, undefined, []);
+
+		assert.strictEqual(launcher.canLaunch(), true);
+		const session = await launcher.launch('hi', { title: 'T', activity: 'worker', metadata: { a: 2 } });
+
+		assert.strictEqual(session?.resource.toString(), 'agent-host-session://quick-1');
+		assert.strictEqual(sessions.created.length, 1);
+		assert.strictEqual(sessions.created[0].folder, undefined, 'workspace-less');
+		assert.strictEqual(sessions.created[0].metadata!.a, 2);
+	});
+
+	test('returns undefined (no launch) when neither a folder nor a quick chat can host a session', async () => {
+		const sessions = new FakeSessions();
+		const launcher = make(sessions, URI.file('/repo'), [URI.file('/recent')]); // nothing servable, no quick chat
 
 		assert.strictEqual(launcher.canLaunch(), false);
 		const session = await launcher.launch('hi', { title: 'T', activity: 'worker' });
