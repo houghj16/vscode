@@ -519,6 +519,331 @@
 	font-size: 14px;
 }
 
+/* Decision-focused Inbox layout. */
+.inbox-one-view {
+	padding: 0;
+}
+
+.inbox-one-panes {
+	gap: 0;
+}
+
+.inbox-one-left {
+	flex-basis: 38%;
+	max-width: 460px;
+	border-right: var(--vscode-strokeThickness) solid var(--vscode-panel-border);
+}
+
+.inbox-one-filter {
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size120) var(--vscode-spacing-size40);
+}
+
+.inbox-one-filter .monaco-inputbox {
+	width: 100%;
+}
+
+.inbox-one-scope {
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size120);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.inbox-one-scope-select {
+	min-width: 0;
+	border: var(--vscode-strokeThickness) solid var(--vscode-dropdown-border);
+	border-radius: var(--vscode-cornerRadius-small);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.inbox-one-list {
+	padding-bottom: var(--vscode-spacing-size160);
+}
+
+.inbox-one-section-header {
+	gap: var(--vscode-spacing-size40);
+	padding: var(--vscode-spacing-size120) var(--vscode-spacing-size120) var(--vscode-spacing-size40);
+	font-size: var(--vscode-fontSize-label2);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	letter-spacing: normal;
+	text-transform: none;
+}
+
+.inbox-one-section-header:focus-visible,
+.inbox-one-item:focus-visible,
+.inbox-one-open-session:focus-visible,
+.inbox-one-claim-receipt:focus-visible,
+.inbox-one-review-summary:focus-visible {
+	outline: var(--vscode-strokeThickness) solid var(--vscode-focusBorder);
+	outline-offset: calc(-1 * var(--vscode-strokeThickness));
+}
+
+.inbox-one-section-caret {
+	width: var(--vscode-codiconFontSize-compact);
+	font-size: var(--vscode-codiconFontSize-compact);
+}
+
+.inbox-one-section-count {
+	font-weight: var(--vscode-fontWeight-regular);
+}
+
+.inbox-one-section-items {
+	padding-left: var(--vscode-spacing-size160);
+}
+
+.inbox-one-item {
+	position: relative;
+	gap: var(--vscode-spacing-size40);
+	margin: var(--vscode-spacing-size20) var(--vscode-spacing-size80);
+	padding: var(--vscode-spacing-size80);
+	border: var(--vscode-strokeThickness) solid transparent;
+	border-radius: var(--vscode-cornerRadius-small);
+	cursor: pointer;
+}
+
+.inbox-one-item:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.inbox-one-item.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+	border-color: var(--vscode-list-activeSelectionBackground);
+}
+
+.inbox-one-item-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--vscode-fontSize-body1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	line-height: 1.4;
+}
+
+.inbox-one-item-context,
+.inbox-one-item-status {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: var(--vscode-spacing-size40);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.inbox-one-item-repo,
+.inbox-one-item-recency,
+.inbox-one-item-state,
+.inbox-one-item-consequence {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.inbox-one-item-repo,
+.inbox-one-item-state {
+	flex-shrink: 0;
+}
+
+.inbox-one-item-recency,
+.inbox-one-item-consequence {
+	min-width: 0;
+}
+
+.inbox-one-item-status-icon {
+	flex: 0 0 var(--vscode-codiconFontSize);
+	width: var(--vscode-codiconFontSize);
+	height: var(--vscode-codiconFontSize);
+}
+
+.inbox-one-item.selected .inbox-one-item-context,
+.inbox-one-item.selected .inbox-one-item-status {
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.inbox-one-item-actions {
+	display: flex;
+	gap: var(--vscode-spacing-size40);
+	margin-top: var(--vscode-spacing-size40);
+}
+
+.inbox-one-item-actions .monaco-button {
+	flex: 0 0 auto;
+	width: auto;
+}
+
+.inbox-one-detail {
+	padding: var(--vscode-spacing-size200) var(--vscode-spacing-size240);
+}
+
+.inbox-one-detail-header {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--vscode-spacing-size160);
+}
+
+.inbox-one-detail-heading {
+	flex: 1;
+	min-width: 0;
+}
+
+.inbox-one-detail-state {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.inbox-one-detail-title {
+	margin: var(--vscode-spacing-size40) 0 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--vscode-fontSize-heading2);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.inbox-one-open-session,
+.inbox-one-claim-receipt {
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.inbox-one-open-session {
+	flex-shrink: 0;
+	margin-top: var(--vscode-spacing-size160);
+	font-size: var(--vscode-fontSize-label1);
+}
+
+.inbox-one-open-session:hover,
+.inbox-one-claim-receipt:hover {
+	color: var(--vscode-textLink-activeForeground);
+	text-decoration: underline;
+}
+
+.inbox-one-detail-meta {
+	display: flex;
+	gap: var(--vscode-spacing-size40);
+	margin-top: var(--vscode-spacing-size20);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.inbox-one-decision-brief {
+	margin-top: var(--vscode-spacing-size160);
+	border: var(--vscode-strokeThickness) solid var(--vscode-editorWidget-border);
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: var(--vscode-editorWidget-background);
+}
+
+.inbox-one-decision-title {
+	margin: 0;
+	padding: var(--vscode-spacing-size120) var(--vscode-spacing-size120) 0;
+	font-size: var(--vscode-fontSize-heading3);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.inbox-one-decision-summary {
+	margin: 0;
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size120);
+	color: var(--vscode-foreground);
+	font-size: var(--vscode-fontSize-body1);
+	line-height: 1.4;
+}
+
+.inbox-one-decision-fyi {
+	display: flex;
+	gap: var(--vscode-spacing-size40);
+	padding: 0 var(--vscode-spacing-size120) var(--vscode-spacing-size120);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.inbox-one-decision-fyi-label,
+.inbox-one-review-heading {
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.inbox-one-review {
+	border-top: var(--vscode-strokeThickness) solid var(--vscode-editorWidget-border);
+}
+
+.inbox-one-review-summary {
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size120);
+	cursor: pointer;
+	font-size: var(--vscode-fontSize-body1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.inbox-one-review-section {
+	padding: 0 var(--vscode-spacing-size120) var(--vscode-spacing-size120);
+}
+
+.inbox-one-review-heading {
+	margin: var(--vscode-spacing-size40) 0;
+	font-size: var(--vscode-fontSize-label1);
+}
+
+.inbox-one-review-list {
+	margin: 0;
+	padding-left: var(--vscode-spacing-size200);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+	line-height: 1.4;
+}
+
+.inbox-one-decision-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--vscode-spacing-size120);
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size120);
+	border-top: var(--vscode-strokeThickness) solid var(--vscode-editorWidget-border);
+}
+
+.inbox-one-decision-outcome {
+	flex: 1;
+	min-width: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.inbox-one-detail-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: var(--vscode-spacing-size60);
+	margin: 0;
+}
+
+.inbox-one-detail-actions .monaco-button {
+	flex: 0 0 auto;
+	width: auto;
+}
+
+.inbox-one-steer-inline {
+	gap: var(--vscode-spacing-size80);
+	margin-top: var(--vscode-spacing-size120);
+}
+
+.inbox-one-diffy-input {
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80);
+	border: var(--vscode-strokeThickness) solid var(--vscode-input-border);
+	border-radius: var(--vscode-cornerRadius-small);
+	font-size: var(--vscode-fontSize-body1);
+}
+
+.inbox-one-detail-empty,
+.inbox-one-empty {
+	padding: var(--vscode-spacing-size400) var(--vscode-spacing-size160);
+}
+
+.inbox-one-empty {
+	gap: var(--vscode-spacing-size60);
+}
+
+.inbox-one-empty-title {
+	font-size: var(--vscode-fontSize-heading3);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
 .inbox-one-settings {
 	padding: 12px 24px;
 	overflow: auto;

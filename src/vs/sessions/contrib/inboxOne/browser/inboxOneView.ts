@@ -5,26 +5,39 @@
 
 import './media/inboxOneView.css';
 import { $, addDisposableListener, clearNode } from '../../../../base/browser/dom.js';
+import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { Button } from '../../../../base/browser/ui/button/button.js';
+import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
+import { fromNow } from '../../../../base/common/date.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun, constObservable, IObservable, ISettableObservable, observableValue } from '../../../../base/common/observable.js';
+import Severity from '../../../../base/common/severity.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
+import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { IHoverService } from '../../../../platform/hover/browser/hover.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { defaultButtonStyles, defaultInputBoxStyles } from '../../../../platform/theme/browser/defaultStyles.js';
+import { SessionStatusIcon } from '../../../browser/sessionStatusIcon.js';
 import { AbstractCustomView } from '../../../services/customView/browser/customView.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { buildConfirmation } from '../common/actionConfirmation.js';
 import { IActionPayloads } from '../common/actionCatalog.js';
 import { IInboxOneStore, TransitionOutcome } from '../common/inboxOneStore.js';
 import { TaskTrigger } from '../common/inboxOneStateMachine.js';
-import { ActionType, GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
+import { GestureKind, ILogicalTask, InboxOneTier, LogicalTaskState } from '../common/inboxOneTypes.js';
 import { composeSteerRelay } from '../common/workerBrief.js';
+import { getApprovalButtonLabel, getApprovalDialogTitle, getTaskAttentionGroup, getTaskConsequence, getTaskSessionStatus, getTaskStateLabel, InboxOneAttentionGroup, matchesTaskFilter } from './inboxOnePresentation.js';
 import { IInboxOneSessionLauncher } from './inboxOneSessionLauncher.js';
 import { IInboxOneNavigator } from './inboxOneNavigator.js';
 
 interface ITierSpec {
-	readonly key: string;
+	readonly key: InboxOneAttentionGroup;
 	readonly label: string;
 	readonly match: (task: ILogicalTask) => boolean;
 }
@@ -35,14 +48,11 @@ const DIFFY_SELECTION = '__diffy__';
 /** Storage key for the persisted set of collapsed section keys. */
 const COLLAPSED_SECTIONS_KEY = 'inboxOne.collapsedSections';
 
-/** The inbox sections in display order (design 3.1). */
+/** Attention-oriented inbox sections in scanning order. */
 const SECTIONS: readonly ITierSpec[] = [
-	{ key: 'critical', label: localize('inboxOne.critical', 'CRITICAL'), match: t => t.state === LogicalTaskState.Decision && t.tier === InboxOneTier.Critical },
-	{ key: 'urgent', label: localize('inboxOne.urgent', 'URGENT'), match: t => (t.state === LogicalTaskState.Decision && t.tier === InboxOneTier.Urgent) || t.state === LogicalTaskState.Blocked },
-	{ key: 'fyi', label: localize('inboxOne.fyi', 'FYI'), match: t => t.state === LogicalTaskState.Decision && (t.tier === InboxOneTier.Fyi || t.tier === undefined) },
-	{ key: 'cooking', label: localize('inboxOne.cooking', 'COOKING'), match: t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming },
-	{ key: 'completed', label: localize('inboxOne.completed', 'COMPLETED'), match: t => t.state === LogicalTaskState.Completed },
-	{ key: 'archive', label: localize('inboxOne.archive', 'ARCHIVE'), match: t => t.state === LogicalTaskState.Archived },
+	{ key: InboxOneAttentionGroup.NeedsAttention, label: localize('inboxOne.needsAttention', "Needs attention"), match: t => getTaskAttentionGroup(t) === InboxOneAttentionGroup.NeedsAttention },
+	{ key: InboxOneAttentionGroup.InProgress, label: localize('inboxOne.inProgress', "In progress"), match: t => getTaskAttentionGroup(t) === InboxOneAttentionGroup.InProgress },
+	{ key: InboxOneAttentionGroup.CompleteUnread, label: localize('inboxOne.completeUnread', "Complete · unread"), match: t => getTaskAttentionGroup(t) === InboxOneAttentionGroup.CompleteUnread },
 ];
 
 /**
@@ -63,13 +73,14 @@ export class InboxOneView extends AbstractCustomView {
 	private inlineComposeDraft = '';
 	private listEl: HTMLElement | undefined;
 	private detailEl: HTMLElement | undefined;
-	private confirmPanel: HTMLElement | undefined;
 	/** A task whose list row should be scrolled into view on the next render (deep-link reveal). */
 	private pendingScrollTaskId: string | undefined;
-	/** Sections the user has collapsed (design/wireframes 6: the caret collapses a section). */
+	/** Sections the user has collapsed. */
 	private readonly collapsedSections = new Set<string>();
-	/** The repo scope filter (wireframes 2 "my" selector); undefined = all repos. */
+	private readonly collapsedSectionsVersion = observableValue('inboxOneCollapsedSectionsVersion', 0);
+	private readonly filterText = observableValue('inboxOneFilterText', '');
 	private readonly scopeRepo: ISettableObservable<string | undefined> = observableValue('inboxOneScope', undefined);
+	private readonly renderDisposables = this._register(new DisposableStore());
 
 	constructor(
 		@IInboxOneStore private readonly store: IInboxOneStore,
@@ -80,6 +91,9 @@ export class InboxOneView extends AbstractCustomView {
 		@ISessionsService private readonly sessionsService: ISessionsService,
 		@IInboxOneSessionLauncher private readonly sessionLauncher: IInboxOneSessionLauncher,
 		@IInboxOneNavigator private readonly navigator: IInboxOneNavigator,
+		@IDialogService private readonly dialogService: IDialogService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IHoverService private readonly hoverService: IHoverService,
 	) {
 		super();
 		for (const key of this.loadCollapsedSections()) {
@@ -93,9 +107,10 @@ export class InboxOneView extends AbstractCustomView {
 			}
 		}));
 		this.description = this.store.tasks.map(tasks => {
-			const cooking = tasks.filter(t => t.state === LogicalTaskState.Cooking || t.state === LogicalTaskState.Confirming).length;
-			const decisions = tasks.filter(t => t.state === LogicalTaskState.Decision || t.state === LogicalTaskState.Blocked).length;
-			return localize('inboxOne.desc', 'Diffy - {0} need you, {1} cooking', decisions, cooking);
+			const needsAttention = tasks.filter(t => getTaskAttentionGroup(t) === InboxOneAttentionGroup.NeedsAttention).length;
+			const inProgress = tasks.filter(t => getTaskAttentionGroup(t) === InboxOneAttentionGroup.InProgress).length;
+			const completeUnread = tasks.filter(t => getTaskAttentionGroup(t) === InboxOneAttentionGroup.CompleteUnread).length;
+			return localize('inboxOne.desc', '{0} needs attention · {1} in progress · {2} complete · unread', needsAttention, inProgress, completeUnread);
 		});
 	}
 
@@ -115,14 +130,17 @@ export class InboxOneView extends AbstractCustomView {
 
 	render(container: HTMLElement): void {
 		container.classList.add('inbox-one-view');
-		// The shared custom-view host is tabindex=-1 and shows a focus-fallback
-		// outline when a click lands on a non-focusable row. This view manages its
-		// own selection highlight, so suppress that outline robustly via an inline
-		// !important rule (beats the shared stylesheet regardless of load order).
-		container.style.setProperty('outline', 'none', 'important');
 		const panes = container.appendChild($('.inbox-one-panes'));
 
 		const left = panes.appendChild($('.inbox-one-left'));
+		const filterContainer = left.appendChild($('.inbox-one-filter'));
+		const filterInput = this._register(new InputBox(filterContainer, undefined, {
+			ariaLabel: localize('inboxOne.filterAriaLabel', "Filter Inbox tasks"),
+			placeholder: localize('inboxOne.filterPlaceholder', "Filter tasks"),
+			inputBoxStyles: defaultInputBoxStyles,
+		}));
+		this._register(filterInput.onDidChange(value => this.filterText.set(value, undefined)));
+		const scopeEl = left.appendChild($('.inbox-one-scope'));
 		const diffy = left.appendChild($('.inbox-one-diffy'));
 		diffy.appendChild($('.inbox-one-diffy-badge', undefined, '\u2726'));
 		diffy.appendChild($('.inbox-one-diffy-label', undefined, localize('inboxOne.diffy', 'Diffy')));
@@ -130,23 +148,32 @@ export class InboxOneView extends AbstractCustomView {
 		this._register(autorun(reader => {
 			diffy.classList.toggle('selected', this.selectedTaskId.read(reader) === DIFFY_SELECTION);
 		}));
-		const scopeEl = left.appendChild($('.inbox-one-scope'));
 		this.listEl = left.appendChild($('.inbox-one-list'));
+		this.listEl.setAttribute('role', 'region');
+		this.listEl.setAttribute('aria-label', localize('inboxOne.taskListAriaLabel', "Inbox tasks"));
 
 		this.detailEl = panes.appendChild($('.inbox-one-detail'));
+		this.detailEl.setAttribute('aria-live', 'polite');
 
 		this._register(autorun(reader => {
+			this.renderDisposables.clear();
 			const tasks = this.store.tasks.read(reader);
 			const selected = this.selectedTaskId.read(reader);
 			const scope = this.scopeRepo.read(reader);
+			const filter = this.filterText.read(reader);
+			this.collapsedSectionsVersion.read(reader);
 			this.inlineCompose.read(reader);
 			this.renderScope(scopeEl, tasks, scope);
-			const scoped = scope ? tasks.filter(t => t.repo === scope) : tasks;
-			this.renderList(scoped, selected);
+			const scoped = tasks.filter(t => (!scope || t.repo === scope) && matchesTaskFilter(t, filter, this.listTitle(t)));
 			if (selected === DIFFY_SELECTION) {
+				this.renderList(scoped, selected);
 				this.renderDiffyDetail(tasks);
 			} else {
-				this.renderDetail(tasks.find(t => t.id === selected));
+				const selectedTask = scoped.find(t => t.id === selected)
+					?? scoped.find(t => getTaskAttentionGroup(t) === InboxOneAttentionGroup.NeedsAttention)
+					?? scoped[0];
+				this.renderList(scoped, selectedTask?.id);
+				this.renderDetail(selectedTask);
 			}
 		}));
 
@@ -176,7 +203,7 @@ export class InboxOneView extends AbstractCustomView {
 		this.selectedTaskId.set(taskId, undefined);
 	}
 
-	/** The "my" repo scope selector (wireframes 2): scope the inbox to one enrolled repo or all. */
+	/** Scopes the inbox to one enrolled repository or all repositories. */
 	private renderScope(container: HTMLElement, tasks: readonly ILogicalTask[], scope: string | undefined): void {
 		clearNode(container);
 		const repos = Array.from(new Set(tasks.map(t => t.repo).filter((r): r is string => !!r))).sort();
@@ -197,7 +224,7 @@ export class InboxOneView extends AbstractCustomView {
 			opt.textContent = repo;
 			opt.selected = scope === repo;
 		}
-		this._register(addDisposableListener(select, 'change', () => {
+		this.renderDisposables.add(addDisposableListener(select, 'change', () => {
 			this.scopeRepo.set(select.value || undefined, undefined);
 		}));
 	}
@@ -209,10 +236,9 @@ export class InboxOneView extends AbstractCustomView {
 			return;
 		}
 		clearNode(detail);
-		this.confirmPanel = undefined;
 
 		const repos = new Set(tasks.map(t => t.repo).filter(Boolean));
-		detail.appendChild($('.inbox-one-detail-tier', undefined, localize('inboxOne.coordinator', 'COORDINATOR')));
+		detail.appendChild($('.inbox-one-detail-state', undefined, localize('inboxOne.coordinator', "Coordinator")));
 		detail.appendChild($('h2.inbox-one-detail-title', undefined, localize('inboxOne.diffyWatching', 'Diffy - watching {0} repo(s)', repos.size)));
 
 		const decisions = tasks.filter(t => t.state === LogicalTaskState.Decision || t.state === LogicalTaskState.Blocked);
@@ -224,18 +250,17 @@ export class InboxOneView extends AbstractCustomView {
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefCooking', '{0} cooking', cooking.length)));
 		brief.appendChild($('.inbox-one-diffy-brief-line', undefined, localize('inboxOne.briefAuto', '{0} auto-handled and logged', autoHandled.length)));
 
-		const settingsLink = brief.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.openSettings', 'Coordinator settings')));
-		this._register(addClick(settingsLink, () => void this.commandService.executeCommand('inboxOne.showSettings')));
+		const settingsLink = brief.appendChild($('a.inbox-one-claim-receipt', { href: '#' }, localize('inboxOne.openSettings', 'Coordinator settings')));
+		this.renderDisposables.add(addClick(settingsLink, () => void this.commandService.executeCommand('inboxOne.showSettings')));
 		brief.appendChild($('span', undefined, '  '));
-		const skillsLink = brief.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.openSkills', 'Skills & roles')));
-		this._register(addClick(skillsLink, () => void this.commandService.executeCommand('inboxOne.showSkills')));
+		const skillsLink = brief.appendChild($('a.inbox-one-claim-receipt', { href: '#' }, localize('inboxOne.openSkills', 'Skills & roles')));
+		this.renderDisposables.add(addClick(skillsLink, () => void this.commandService.executeCommand('inboxOne.showSkills')));
 
 		const composer = detail.appendChild($('.inbox-one-diffy-composer-wrap'));
 		const composerRow = composer.appendChild($('.inbox-one-diffy-composer'));
 		const input = composerRow.appendChild($('input.inbox-one-diffy-input')) as HTMLInputElement;
 		input.type = 'text';
 		input.placeholder = localize('inboxOne.talkToDiffy', 'Talk to Diffy...');
-		const send = composerRow.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.send', 'Send')));
 		const submit = () => {
 			const text = input.value.trim();
 			if (!text) {
@@ -244,8 +269,8 @@ export class InboxOneView extends AbstractCustomView {
 			input.value = '';
 			this.notificationService.info(localize('inboxOne.diffyReply', 'Diffy: {0}', this.diffyReply(text, decisions.length, cooking.length, repos.size)));
 		};
-		this._register(addClick(send, submit));
-		this._register(addKeydown(input, 'Enter', submit));
+		this.createButton(composerRow, localize('inboxOne.send', "Send"), true, submit);
+		this.renderDisposables.add(addKeydown(input, 'Enter', submit));
 	}
 
 	/** The reference-into-Diffy continuation (design 3.6, 2.4): steer/reopen -> relay the
@@ -307,53 +332,87 @@ export class InboxOneView extends AbstractCustomView {
 				continue;
 			}
 			const collapsed = this.collapsedSections.has(section.key);
+			const sectionId = `inbox-one-section-${section.key}`;
 			const header = list.appendChild($('button.inbox-one-section-header'));
 			header.classList.toggle('collapsed', collapsed);
-			header.appendChild($('span.inbox-one-section-caret', undefined, collapsed ? '\u203a' : '\u2304'));
+			header.setAttribute('type', 'button');
+			header.setAttribute('aria-expanded', String(!collapsed));
+			header.setAttribute('aria-controls', sectionId);
+			const chevron = header.appendChild(renderIcon(collapsed ? Codicon.chevronRight : Codicon.chevronDown));
+			chevron.classList.add('inbox-one-section-caret');
+			chevron.setAttribute('aria-hidden', 'true');
 			header.appendChild($('.inbox-one-section-label', undefined, section.label));
 			header.appendChild($('.inbox-one-section-count', undefined, String(items.length)));
-			this._register(addClick(header, () => {
+			this.renderDisposables.add(addClick(header, () => {
 				if (this.collapsedSections.has(section.key)) {
 					this.collapsedSections.delete(section.key);
 				} else {
 					this.collapsedSections.add(section.key);
 				}
 				this.persistCollapsedSections();
-				this.renderList(this.store.tasks.get(), this.selectedTaskId.get());
+				this.collapsedSectionsVersion.set(this.collapsedSectionsVersion.get() + 1, undefined);
 			}));
 			if (collapsed) {
 				continue;
 			}
+			const sectionItems = list.appendChild($('.inbox-one-section-items'));
+			sectionItems.id = sectionId;
+			sectionItems.setAttribute('role', 'list');
+			sectionItems.setAttribute('aria-label', section.label);
 			for (const task of items) {
-				list.appendChild(this.renderListItem(task, section.key, task.id === selectedId));
+				sectionItems.appendChild(this.renderListItem(task, task.id === selectedId));
 			}
 		}
 	}
 
-	private renderListItem(task: ILogicalTask, sectionKey: string, selected: boolean): HTMLElement {
+	private renderListItem(task: ILogicalTask, selected: boolean): HTMLElement {
 		const row = $('.inbox-one-item');
-		row.classList.add(`inbox-one-item-${sectionKey}`);
+		row.setAttribute('role', 'listitem');
+		row.tabIndex = 0;
+		row.setAttribute('aria-current', selected ? 'true' : 'false');
 		if (selected) {
 			row.classList.add('selected');
 		}
-		const blocked = task.state === LogicalTaskState.Blocked;
-		if (blocked) {
-			row.classList.add('blocked');
-		}
-		const title = row.appendChild($('.inbox-one-item-title'));
-		if (blocked) {
-			title.appendChild($('span.inbox-one-item-blocked-badge', undefined, localize('inboxOne.blockedBadge', '! BLOCKED')));
-		}
-		title.appendChild($('span', undefined, this.listTitle(task)));
-		const meta = row.appendChild($('.inbox-one-item-meta'));
+		const titleText = this.listTitle(task);
+		const title = row.appendChild($('.inbox-one-item-title', undefined, titleText));
+		this.renderDisposables.add(this.hoverService.setupDelayedHover(title, { content: titleText }));
+
+		const context = row.appendChild($('.inbox-one-item-context'));
 		if (task.repo) {
-			meta.appendChild($('span.inbox-one-item-repo', undefined, task.repo));
+			context.appendChild($('span.inbox-one-item-repo', undefined, task.repo));
 		}
-		meta.appendChild($('span.inbox-one-item-reason', undefined, task.rankReason ?? this.stateLabel(task.state)));
-		if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
-			row.appendChild(this.renderCookingStages(task, true));
+		if (task.repo) {
+			context.appendChild($('span.inbox-one-item-separator', { 'aria-hidden': 'true' }, '\u00b7'));
 		}
-		this._register(addClick(row, () => this.selectedTaskId.set(task.id, undefined)));
+		context.appendChild($('span.inbox-one-item-recency', undefined, fromNow(task.updatedAt, true)));
+
+		const statusRow = row.appendChild($('.inbox-one-item-status'));
+		const statusIconContainer = statusRow.appendChild($('.inbox-one-item-status-icon'));
+		statusIconContainer.setAttribute('aria-hidden', 'true');
+		const statusIcon = this.renderDisposables.add(this.instantiationService.createInstance(SessionStatusIcon, statusIconContainer));
+		statusIcon.setStatus(getTaskSessionStatus(task), task.state !== LogicalTaskState.Completed, task.state === LogicalTaskState.Archived);
+		const state = getTaskStateLabel(task);
+		statusRow.appendChild($('span.inbox-one-item-state', undefined, state));
+		const consequence = getTaskConsequence(task);
+		if (consequence) {
+			statusRow.appendChild($('span.inbox-one-item-separator', { 'aria-hidden': 'true' }, '\u00b7'));
+			statusRow.appendChild($('span.inbox-one-item-consequence', undefined, consequence));
+		}
+
+		if (getTaskAttentionGroup(task) === InboxOneAttentionGroup.NeedsAttention) {
+			const actions = row.appendChild($('.inbox-one-item-actions'));
+			this.renderDisposables.add(addDisposableListener(actions, 'click', event => event.stopPropagation()));
+			this.renderDisposables.add(addDisposableListener(actions, 'keydown', event => event.stopPropagation()));
+			this.createButton(actions, localize('inboxOne.skip', "Skip"), false, () => void this.skip(task));
+			if (task.evidence?.primaryAction) {
+				this.createButton(actions, localize('inboxOne.approve', "Approve"), true, () => void this.confirmAndAccept(task));
+			} else {
+				this.createButton(actions, localize('inboxOne.review', "Review"), true, () => this.selectedTaskId.set(task.id, undefined));
+			}
+		}
+
+		row.setAttribute('aria-label', [titleText, task.repo, fromNow(task.updatedAt, true), state, consequence].filter(Boolean).join(', '));
+		this.renderDisposables.add(addActivation(row, () => this.selectedTaskId.set(task.id, undefined)));
 		if (this.pendingScrollTaskId === task.id) {
 			this.pendingScrollTaskId = undefined;
 			queueMicrotask(() => row.scrollIntoView({ block: 'nearest' }));
@@ -373,65 +432,78 @@ export class InboxOneView extends AbstractCustomView {
 			return;
 		}
 
-		if (task.state === LogicalTaskState.Blocked) {
-			this.renderBlockedDetail(detail, task);
-			return;
-		}
-
 		const pack = task.evidence;
-		detail.appendChild($('.inbox-one-detail-tier', undefined, `${(task.tier ?? '').toUpperCase()} - ${task.type}`));
-		detail.appendChild($('h2.inbox-one-detail-title', undefined, this.listTitle(task)));
-		if (pack?.decisionSentence) {
-			detail.appendChild($('.inbox-one-detail-summary', undefined, pack.decisionSentence));
-		}
+		const header = detail.appendChild($('.inbox-one-detail-header'));
+		const heading = header.appendChild($('.inbox-one-detail-heading'));
+		heading.appendChild($('.inbox-one-detail-state', undefined, this.detailStateLabel(task)));
+		const titleText = this.listTitle(task);
+		const title = heading.appendChild($('h2.inbox-one-detail-title', undefined, titleText));
+		this.renderDisposables.add(this.hoverService.setupDelayedHover(title, { content: titleText }));
+		const openSession = header.appendChild($('a.inbox-one-open-session', { href: '#' }, localize('inboxOne.openFullSession', "Open full session")));
+		this.renderDisposables.add(addClick(openSession, () => this.openWorkerSession(task)));
+
+		const meta = detail.appendChild($('.inbox-one-detail-meta'));
 		if (task.repo) {
-			detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo}${pack?.freshness.headSha ? ' - head ' + pack.freshness.headSha : ''}`));
+			meta.appendChild($('span.inbox-one-detail-repo', undefined, task.repo));
+			meta.appendChild($('span.inbox-one-detail-separator', { 'aria-hidden': 'true' }, '\u00b7'));
 		}
+		meta.appendChild($('span', undefined, localize('inboxOne.updated', "Updated {0}", fromNow(task.updatedAt, true))));
 
-		if (pack?.primaryAction) {
-			detail.appendChild($('.inbox-one-detail-accepting', undefined, this.acceptingLine(pack.primaryAction.actionType)));
-		}
+		const brief = detail.appendChild($('section.inbox-one-decision-brief'));
+		brief.setAttribute('aria-label', localize('inboxOne.decisionBrief', "Decision brief"));
+		const proposal = getTaskConsequence(task) ?? pack?.customAsk ?? pack?.decisionSentence ?? getTaskStateLabel(task);
+		brief.appendChild($('h3.inbox-one-decision-title', undefined, proposal));
 
-		if (pack?.customAsk) {
-			const ask = detail.appendChild($('.inbox-one-detail-ask'));
-			ask.appendChild($('.inbox-one-detail-ask-label', undefined, localize('inboxOne.diffyAsks', 'Diffy needs your decision:')));
-			ask.appendChild($('.inbox-one-detail-ask-body', undefined, pack.customAsk));
-		}
-
-		if (pack && pack.claims.length) {
-			const why = detail.appendChild($('.inbox-one-detail-claims'));
-			why.appendChild($('.inbox-one-detail-claims-header', undefined, localize('inboxOne.evidence', 'Evidence')));
-			for (const claim of pack.claims) {
-				const claimEl = why.appendChild($('.inbox-one-claim'));
-				claimEl.appendChild($('span.inbox-one-claim-bullet', undefined, '\u2022'));
-				claimEl.appendChild($('span.inbox-one-claim-text', undefined, claim.text));
-				if (claim.receiptLink) {
-					const link = claimEl.appendChild($('a.inbox-one-claim-receipt', undefined, localize('inboxOne.receipt', 'receipt')));
-					this._register(addClick(link, () => this.openReceipt(claim.receiptLink!)));
-				}
-			}
+		if (pack?.decisionSentence) {
+			brief.appendChild($('p.inbox-one-decision-summary', undefined, pack.decisionSentence));
+		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
+			brief.appendChild($('p.inbox-one-decision-summary', undefined, localize('inboxOne.cookingNote', "The agent is working on this task. Evidence will appear here when it is ready.")));
+		} else if (task.state === LogicalTaskState.Blocked) {
+			brief.appendChild($('p.inbox-one-decision-summary', undefined, task.recoveryStep ?? localize('inboxOne.blockedGeneric', "The agent needs a human-only fact or permission to continue.")));
 		}
 
 		if (pack?.gapLine) {
-			detail.appendChild($('.inbox-one-detail-gap', undefined, pack.gapLine));
+			const fyi = brief.appendChild($('.inbox-one-decision-fyi'));
+			fyi.appendChild($('span.inbox-one-decision-fyi-label', undefined, localize('inboxOne.fyiLabel', "FYI:")));
+			fyi.appendChild($('span', undefined, pack.gapLine));
 		}
 
-		if (task.state === LogicalTaskState.Decision) {
-			detail.appendChild(this.renderDetailActions(task));
+		if (pack && pack.claims.length) {
+			const review = brief.appendChild($('details.inbox-one-review'));
+			const reviewSummary = review.appendChild($('summary.inbox-one-review-summary', undefined, localize('inboxOne.review', "Review")));
+			reviewSummary.setAttribute('aria-label', localize('inboxOne.reviewAriaLabel', "Review decisions and evidence"));
+			const decisions = review.appendChild($('.inbox-one-review-section'));
+			decisions.appendChild($('h4.inbox-one-review-heading', undefined, localize('inboxOne.decisions', "Decisions")));
+			const decisionList = decisions.appendChild($('ul.inbox-one-review-list'));
+			for (const claim of pack.claims) {
+				decisionList.appendChild($('li', undefined, claim.text));
+			}
+
+			const evidenceClaims = pack.claims.filter(claim => !!claim.receiptLink);
+			if (evidenceClaims.length) {
+				const evidence = review.appendChild($('.inbox-one-review-section'));
+				evidence.appendChild($('h4.inbox-one-review-heading', undefined, localize('inboxOne.evidence', "Evidence")));
+				const evidenceList = evidence.appendChild($('ul.inbox-one-review-list'));
+				evidenceClaims.forEach(claim => {
+					const item = evidenceList.appendChild($('li'));
+					const link = item.appendChild($('a.inbox-one-claim-receipt', { href: '#' }, claim.text));
+					this.renderDisposables.add(addClick(link, () => this.openReceipt(claim.receiptLink!)));
+				});
+			}
+		}
+
+		if (task.state === LogicalTaskState.Decision || task.state === LogicalTaskState.Blocked) {
+			brief.appendChild(this.renderDetailActions(task));
 		} else if (task.state === LogicalTaskState.Completed) {
-			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.completedNote', 'Completed. History preserved.')));
-			const actions = detail.appendChild($('.inbox-one-detail-actions'));
-			const reopen = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.reopen', 'Reopen with Diffy')));
-			this._register(addClick(reopen, () => this.openInlineComposer(task, 'reopen')));
-			const archive = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.archiveBtn', 'Archive')));
-			this._register(addClick(archive, () => this.dismiss(task)));
-		} else if (task.state === LogicalTaskState.Cooking || task.state === LogicalTaskState.Confirming) {
-			detail.appendChild($('.inbox-one-detail-done', undefined, localize('inboxOne.cookingNote', 'Diffy is working on this. Evidence will land here when ready.')));
-			const actions = detail.appendChild($('.inbox-one-detail-actions'));
-			const open = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.openWork', 'Open')));
-			this._register(addClick(open, () => this.openWorkerSession(task)));
-			const cancel = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancelWork', 'Cancel work')));
-			this._register(addClick(cancel, () => this.cancelWork(task)));
+			const footer = brief.appendChild($('.inbox-one-decision-footer'));
+			footer.appendChild($('.inbox-one-decision-outcome', undefined, localize('inboxOne.completedNote', "Complete · history preserved")));
+			const actions = footer.appendChild($('.inbox-one-detail-actions'));
+			this.createButton(actions, localize('inboxOne.reopen', "Reopen with Diffy"), true, () => this.openInlineComposer(task, 'reopen'));
+		} else {
+			const footer = brief.appendChild($('.inbox-one-decision-footer'));
+			footer.appendChild($('.inbox-one-decision-outcome', undefined, getTaskStateLabel(task)));
+			const actions = footer.appendChild($('.inbox-one-detail-actions'));
+			this.createButton(actions, localize('inboxOne.cancelWork', "Cancel Work"), false, () => void this.cancelWork(task));
 		}
 
 		this.renderInlineComposer(detail, task);
@@ -454,8 +526,7 @@ export class InboxOneView extends AbstractCustomView {
 			? localize('inboxOne.reopenPrompt', 'Reopen this and ...')
 			: localize('inboxOne.steerPrompt', "Here's how you can make it better...");
 		input.value = this.inlineComposeDraft;
-		this._register(addDisposableListener(input, 'input', () => { this.inlineComposeDraft = input.value; }));
-		const send = wrap.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, localize('inboxOne.send', 'Send')));
+		this.renderDisposables.add(addDisposableListener(input, 'input', () => { this.inlineComposeDraft = input.value; }));
 		const submit = () => {
 			const text = input.value.trim();
 			if (!text) {
@@ -465,40 +536,10 @@ export class InboxOneView extends AbstractCustomView {
 			this.inlineCompose.set(undefined, undefined);
 			void this.continueTask(task, open.intent, text);
 		};
-		this._register(addClick(send, submit));
-		this._register(addKeydown(input, 'Enter', submit));
+		this.createButton(wrap, localize('inboxOne.send', "Send"), true, submit);
+		this.renderDisposables.add(addKeydown(input, 'Enter', submit));
 		input.focus();
 		input.setSelectionRange(input.value.length, input.value.length);
-	}
-
-	/**
-	 * The Blocked recovery layout (wireframes 7): a distinct "! BLOCKED" header,
-	 * what is blocked, and the single recovery step, with a primary action that
-	 * supplies the fact/permission (-> back to Cooking), plus Steer and Dismiss.
-	 */
-	private renderBlockedDetail(detail: HTMLElement, task: ILogicalTask): void {
-		const pack = task.evidence;
-		const subject = task.sourceEvent.subject;
-		detail.appendChild($('.inbox-one-detail-blocked-tier', undefined, `\u0021 ${localize('inboxOne.blockedLabel', 'BLOCKED')} \u00b7 ${task.type}`));
-		detail.appendChild($('h2.inbox-one-detail-title', undefined, this.listTitle(task)));
-		if (pack?.decisionSentence) {
-			detail.appendChild($('.inbox-one-detail-summary', undefined, pack.decisionSentence));
-		}
-		detail.appendChild($('.inbox-one-detail-sub', undefined, `${task.repo ?? ''}${task.repo ? ' \u00b7 ' : ''}${subject.kind} ${subject.id}`));
-
-		const need = detail.appendChild($('.inbox-one-blocked-need'));
-		need.appendChild($('span.inbox-one-blocked-need-label', undefined, localize('inboxOne.whatINeed', 'What I need: ')));
-		need.appendChild($('span', undefined, task.recoveryStep ?? localize('inboxOne.blockedGeneric', 'a human-only fact or permission to continue.')));
-
-		const actions = detail.appendChild($('.inbox-one-detail-actions'));
-		const supply = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.provideAndRetry', "I've unblocked this")} \u25b8`));
-		this._register(addClick(supply, () => this.recoverySupplied(task)));
-		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
-		this._register(addClick(steer, () => this.steer(task)));
-		const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
-		this._register(addClick(dismiss, () => this.dismiss(task)));
-
-		this.renderInlineComposer(detail, task);
 	}
 
 	/** Human supplied the blocker's fact/permission: retry (Blocked -> Cooking). */
@@ -509,41 +550,7 @@ export class InboxOneView extends AbstractCustomView {
 		}
 	}
 
-	/**
-	 * The three cooking stages (wireframes 6): Triggered -> Doing work ->
-	 * Assembling evidence. Shown in the left list preview; `compact` drops the
-	 * role/elapsed meta line for the tighter row layout.
-	 */
-	private renderCookingStages(task: ILogicalTask, compact = false): HTMLElement {
-		const wrap = $('.inbox-one-cooking');
-		if (compact) {
-			wrap.classList.add('compact');
-		}
-		const active = task.state === LogicalTaskState.Confirming ? 2 : 1;
-		const labels = [
-			localize('inboxOne.stageTriggered', 'Triggered'),
-			localize('inboxOne.stageDoing', 'Doing work'),
-			localize('inboxOne.stageAssembling', 'Assembling evidence'),
-		];
-		const stages = wrap.appendChild($('.inbox-one-cooking-stages'));
-		labels.forEach((label, i) => {
-			if (i > 0) {
-				stages.appendChild($(`.inbox-one-cooking-rail${i <= active ? '.filled' : ''}`));
-			}
-			const state = i < active ? 'done' : i === active ? 'active' : 'pending';
-			const stage = stages.appendChild($(`.inbox-one-cooking-stage.${state}`));
-			stage.appendChild($('span.inbox-one-cooking-dot', undefined, state === 'pending' ? '\u25cb' : '\u25cf'));
-			stage.appendChild($('span', undefined, label));
-		});
-		if (!compact) {
-			const attempt = task.attempts[task.currentAttempt];
-			const elapsed = formatElapsed(Date.now() - (attempt?.startedAt ?? task.createdAt));
-			wrap.appendChild($('.inbox-one-cooking-meta', undefined, `\u25b2 ${task.type} \u00b7 ${elapsed}`));
-		}
-		return wrap;
-	}
-
-	/** Opens the live worker session backing the current attempt (wireframes 6: [ Open ]). */
+	/** Opens the live worker session backing the current attempt. */
 	private openWorkerSession(task: ILogicalTask): void {
 		const ref = task.attempts[task.currentAttempt]?.sessionRef;
 		if (!ref || ref.startsWith('inboxone-pending:') || ref.startsWith('inboxone-stub:')) {
@@ -588,67 +595,77 @@ export class InboxOneView extends AbstractCustomView {
 	}
 
 	private renderDetailActions(task: ILogicalTask): HTMLElement {
-		const actions = $('.inbox-one-detail-actions');
-		// A custom ask ("other" action) has no typed action to accept; the human
-		// answers the worker's ask via Steer, so Steer is the primary affordance.
-		if (task.evidence?.customAsk) {
-			const steerPrimary = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${localize('inboxOne.steer', 'Steer')} \u25b8`));
-			this._register(addClick(steerPrimary, () => this.steer(task)));
-			const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
-			this._register(addClick(dismiss, () => this.dismiss(task)));
-			return actions;
+		const footer = $('.inbox-one-decision-footer');
+		const action = task.evidence?.primaryAction;
+		if (action) {
+			const confirmation = buildConfirmation(action.actionType, action.payload as IActionPayloads[typeof action.actionType]);
+			footer.appendChild($('.inbox-one-decision-outcome', undefined, confirmation.reversibilityLine));
+		} else {
+			footer.appendChild($('.inbox-one-decision-outcome'));
 		}
-		const primaryLabel = task.evidence?.primaryAction?.label ?? localize('inboxOne.accept', 'Accept');
-		const accept = actions.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, `${primaryLabel} \u25b8`));
-		this._register(addClick(accept, () => this.confirmAndAccept(task)));
 
-		const steer = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.steer', 'Steer')));
-		this._register(addClick(steer, () => this.steer(task)));
+		const actions = footer.appendChild($('.inbox-one-detail-actions'));
+		this.createButton(actions, localize('inboxOne.notNow', "Not Now"), false, () => this.selectedTaskId.set(undefined, undefined));
 
-		const dismiss = actions.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.dismiss', 'Dismiss')));
-		this._register(addClick(dismiss, () => this.dismiss(task)));
-		return actions;
+		if (task.state === LogicalTaskState.Blocked) {
+			this.createButton(actions, localize('inboxOne.requestChanges', "Request Changes"), false, () => this.steer(task));
+			this.createButton(actions, localize('inboxOne.provideAndRetry', "I've Unblocked This"), true, () => void this.recoverySupplied(task));
+			return footer;
+		}
+
+		if (task.evidence?.customAsk) {
+			this.createButton(actions, localize('inboxOne.requestChanges', "Request Changes"), true, () => this.steer(task));
+			return footer;
+		}
+
+		this.createButton(actions, localize('inboxOne.requestChanges', "Request Changes"), false, () => this.steer(task));
+		this.createButton(actions, getApprovalButtonLabel(task), true, () => void this.confirmAndAccept(task));
+		return footer;
 	}
 
-	/** Renders the host-generated typed confirmation inline, then executes on confirm (design 7.3). */
-	private confirmAndAccept(task: ILogicalTask): void {
-		const detail = this.detailEl;
+	/** Shows the host-generated typed confirmation in the standard modal, then executes on confirm. */
+	private async confirmAndAccept(task: ILogicalTask): Promise<void> {
 		const action = task.evidence?.primaryAction;
-		if (!detail || !action) {
-			void this.accept(task);
+		if (!action) {
 			return;
 		}
-		this.confirmPanel?.remove();
+
 		const confirmation = buildConfirmation(action.actionType, action.payload as IActionPayloads[typeof action.actionType]);
-		const panel = detail.appendChild($('.inbox-one-confirm'));
-		this.confirmPanel = panel;
-		if (confirmation.highlight) {
-			panel.classList.add('irreversible');
-		}
-		panel.appendChild($('.inbox-one-confirm-title', undefined, localize('inboxOne.confirmTitle', 'Confirm - {0}', action.label)));
-		const effects = panel.appendChild($('.inbox-one-confirm-effects'));
-		effects.appendChild($('.inbox-one-confirm-effects-label', undefined, localize('inboxOne.thisWill', 'This will:')));
-		for (const line of confirmation.effectLines) {
-			effects.appendChild($('.inbox-one-confirm-effect', undefined, `\u2022 ${line}`));
-		}
-		panel.appendChild($('.inbox-one-confirm-reversibility', undefined, confirmation.reversibilityLine));
+		const detailLines = [
+			localize('inboxOne.confirmExplanation', "The task narrative, decisions, and evidence remain attached to the resulting action."),
+			'',
+			...confirmation.effectLines.map(line => `\u2022 ${line}`),
+			`\u2022 ${confirmation.reversibilityLine}`,
+		];
 		if (task.evidence?.gapLine) {
-			panel.appendChild($('.inbox-one-confirm-gap', undefined, task.evidence.gapLine));
+			detailLines.push(`\u2022 ${localize('inboxOne.fyiLabel', "FYI:")} ${task.evidence.gapLine}`);
 		}
-		const buttons = panel.appendChild($('.inbox-one-confirm-buttons'));
-		const cancel = buttons.appendChild($('button.inbox-one-action', undefined, localize('inboxOne.cancel', 'Cancel')));
-		this._register(addClick(cancel, () => panel.remove()));
-		const go = buttons.appendChild($('button.inbox-one-action.inbox-one-action-primary', undefined, action.label));
-		this._register(addClick(go, () => { panel.remove(); void this.accept(task); }));
+		const { confirmed } = await this.dialogService.confirm({
+			type: confirmation.highlight ? Severity.Warning : Severity.Info,
+			title: getApprovalDialogTitle(task),
+			message: getTaskConsequence(task) ?? action.label,
+			detail: detailLines.join('\n'),
+			primaryButton: getApprovalButtonLabel(task),
+			cancelButton: localize('inboxOne.cancel', "Cancel"),
+			custom: true,
+		});
+		if (confirmed) {
+			await this.accept(task);
+		}
 	}
 
-	private acceptingLine(actionType: ActionType): string {
-		switch (actionType) {
-			case ActionType.ApprovePr: return localize('inboxOne.acceptingApprove', 'Accepting: approves the PR (you still control the merge).');
-			case ActionType.MergePr: return localize('inboxOne.acceptingMerge', 'Accepting: merges the PR and reruns checks.');
-			case ActionType.CreateIssues: return localize('inboxOne.acceptingIssues', 'Accepting: creates the grouped meta-issues.');
-			default: return localize('inboxOne.acceptingGeneric', 'Accepting runs the typed action.');
-		}
+	private async skip(task: ILogicalTask): Promise<void> {
+		await this.continueTask(task, 'steer', localize('inboxOne.skipInstruction', "Use your judgment and continue without waiting for my decision."));
+	}
+
+	private createButton(container: HTMLElement, label: string, primary: boolean, run: () => void): Button {
+		const button = this.renderDisposables.add(new Button(container, {
+			...defaultButtonStyles,
+			secondary: !primary,
+		}));
+		button.label = label;
+		this.renderDisposables.add(button.onDidClick(run));
+		return button;
 	}
 
 	private async accept(task: ILogicalTask): Promise<void> {
@@ -661,10 +678,6 @@ export class InboxOneView extends AbstractCustomView {
 		} else {
 			this.notificationService.warn(localize('inboxOne.staleAccept', 'This decision changed - re-verify before accepting.'));
 		}
-	}
-
-	private async dismiss(task: ILogicalTask): Promise<void> {
-		await this.store.transition(task.id, TaskTrigger.Dismiss, { archiveReason: 'dismissed from inbox' });
 	}
 
 	private openReceipt(link: string): void {
@@ -689,13 +702,16 @@ export class InboxOneView extends AbstractCustomView {
 		return task.evidence?.title?.trim() || this.fallbackTitle(task);
 	}
 
-	private stateLabel(state: LogicalTaskState): string {
-		switch (state) {
-			case LogicalTaskState.Cooking: return localize('inboxOne.stateCooking', 'cooking');
-			case LogicalTaskState.Confirming: return localize('inboxOne.stateConfirming', 'confirming');
-			case LogicalTaskState.Completed: return localize('inboxOne.stateCompleted', 'completed');
-			case LogicalTaskState.Archived: return localize('inboxOne.stateArchived', 'archived');
-			default: return '';
+	private detailStateLabel(task: ILogicalTask): string {
+		switch (getTaskAttentionGroup(task)) {
+			case InboxOneAttentionGroup.NeedsAttention:
+				return localize('inboxOne.detailNeedsAttention', "Needs attention · {0}", getTaskStateLabel(task));
+			case InboxOneAttentionGroup.InProgress:
+				return localize('inboxOne.detailInProgress', "In progress · {0}", getTaskStateLabel(task));
+			case InboxOneAttentionGroup.CompleteUnread:
+				return getTaskStateLabel(task);
+			default:
+				return getTaskStateLabel(task);
 		}
 	}
 
@@ -708,12 +724,17 @@ function addClick(el: HTMLElement, handler: () => void): { dispose(): void } {
 	return { dispose: () => el.removeEventListener('click', listener) };
 }
 
-/** Human-legible elapsed time (no telemetry chrome): "just now", "6m", "2h". */
-function formatElapsed(ms: number): string {
-	const mins = Math.floor(ms / 60000);
-	if (mins < 1) { return localize('inboxOne.justNow', 'just now'); }
-	if (mins < 60) { return localize('inboxOne.minutes', '{0}m', mins); }
-	return localize('inboxOne.hours', '{0}h', Math.floor(mins / 60));
+function addActivation(element: HTMLElement, handler: () => void): { dispose(): void } {
+	const disposables = new DisposableStore();
+	disposables.add(addClick(element, handler));
+	disposables.add(addDisposableListener(element, 'keydown', event => {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			event.stopPropagation();
+			handler();
+		}
+	}));
+	return disposables;
 }
 
 function addKeydown(el: HTMLElement, key: string, handler: () => void): { dispose(): void } {
